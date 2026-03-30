@@ -1,3 +1,5 @@
+![Senado de Praxis](https://i.postimg.cc/9MPcZn6S/PRAXIS-SENATE.png)
+
 # Sistema Multi-Agente Profesional
 
 Un sistema de orquestación multi-agente con arquitectura Manager-Worker, comunicación asíncrona event-driven, y dashboard CLI visual.
