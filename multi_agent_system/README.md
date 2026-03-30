@@ -1,5 +1,7 @@
 # PRAXIS-SENATE
 
+<img src="https://i.postimg.cc/9MPcZn6S/PRAXIS-SENATE.png" width="200" align="right" />
+
 > **Autonomous Multi-Agent Orchestration with Human-in-the-Loop Intelligence**
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
