@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRAXIS-SENATE Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/static/css/main.css">
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">☰</button>
+                <h1>PRAXIS-SENATE</h1>
+                <span class="status-indicator" id="systemStatus">
+                    <span class="dot"></span> Connecting...
+                </span>
+            </div>
+            <div class="header-right">
+                <button class="btn-new-task" onclick="openNewTaskModal()">+ New Task</button>
+                <div class="provider-info">
+                    <span class="label">LLM Provider:</span>
+                    <span class="value" id="llmProvider">-</span>
+                </div>
+                <div class="critic-toggle">
+                    <label class="switch">
+                        <input type="checkbox" id="criticToggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span>Critic Agent</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Lateral Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-section">
+                <h3 class="sidebar-title">Agent Roles</h3>
+                <div class="role-buttons">
+                    <button class="role-btn" onclick="openRoleModal('SENIOR_AGENT.md')">
+                        <span class="role-icon">👑</span>
+                        <span>Senior Agent</span>
+                    </button>
+                    <button class="role-btn" onclick="openRoleModal('WORKER_AGENT.md')">
+                        <span class="role-icon">⚙️</span>
+                        <span>Worker Agent</span>
+                    </button>
+                    <button class="role-btn" onclick="openRoleModal('CRITIC_AGENT.md')">
+                        <span class="role-icon">🔍</span>
+                        <span>Critic Agent</span>
+                    </button>
+                    <button class="role-btn" onclick="openRoleModal('ARCHITECT.md')">
+                        <span class="role-icon">📐</span>
+                        <span>Architect</span>
+                    </button>
+                    <button class="role-btn" onclick="openRoleModal('CODER.md')">
+                        <span class="role-icon">💻</span>
+                        <span>Coder</span>
+                    </button>
+                    <button class="role-btn" onclick="openRoleModal('RESEARCHER.md')">
+                        <span class="role-icon">🔬</span>
+                        <span>Researcher</span>
+                    </button>
+                    <button class="role-btn" onclick="openRoleModal('REVIEWER.md')">
+                        <span class="role-icon">📝</span>
+                        <span>Reviewer</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3 class="sidebar-title">Task History</h3>
+                <div class="history-list" id="taskHistory">
+                    <p class="empty-state">No completed tasks yet</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Task Board -->
+            <section class="panel task-board">
+                <div class="panel-header">
+                    <h2>Task Board</h2>
+                    <div class="filter-controls">
+                        <select id="taskFilter">
+                            <option value="">All Status</option>
+                            <option value="pending">Pending</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="completed">Completed</option>
+                            <option value="failed">Failed</option>
+                            <option value="halted">Halted</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="kanban-columns" id="taskBoard">
+                    <div class="kanban-column" data-status="pending">
+                        <div class="column-header">
+                            <h3>Pending</h3>
+                            <span class="count" id="pendingCount">0</span>
+                        </div>
+                        <div class="task-list" id="pendingTasks"></div>
+                    </div>
+                    <div class="kanban-column" data-status="in_progress">
+                        <div class="column-header">
+                            <h3>In Progress</h3>
+                            <span class="count" id="inProgressCount">0</span>
+                        </div>
+                        <div class="task-list" id="inProgressTasks"></div>
+                    </div>
+                    <div class="kanban-column" data-status="completed">
+                        <div class="column-header">
+                            <h3>Completed</h3>
+                            <span class="count" id="completedCount">0</span>
+                        </div>
+                        <div class="task-list" id="completedTasks"></div>
+                    </div>
+                    <div class="kanban-column" data-status="failed">
+                        <div class="column-header">
+                            <h3>Failed</h3>
+                            <span class="count" id="failedCount">0</span>
+                        </div>
+                        <div class="task-list" id="failedTasks"></div>
+                    </div>
+                    <div class="kanban-column" data-status="halted">
+                        <div class="column-header">
+                            <h3>Halted</h3>
+                            <span class="count" id="haltedCount">0</span>
+                        </div>
+                        <div class="task-list" id="haltedTasks"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Agent Pool -->
+            <section class="panel agent-pool">
+                <div class="panel-header">
+                    <h2>Agent Pool</h2>
+                </div>
+                <div class="agent-grid" id="agentGrid"></div>
+            </section>
+
+            <!-- Senior Agent Panel (Collapsible) -->
+            <section class="panel senior-panel">
+                <div class="panel-header collapsible" onclick="togglePanel('senior')">
+                    <h2>👑 Senior Agent</h2>
+                    <span class="accordion-icon" id="seniorAccordion">🔽</span>
+                </div>
+                <div class="panel-content" id="seniorContent">
+                    <div class="info-row">
+                        <span class="label">Current Task:</span>
+                        <span class="value" id="seniorCurrentTask">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Quality Score:</span>
+                        <span class="value" id="qualityScore">-</span>
+                    </div>
+                    <div class="llm-log-section">
+                        <h3>🤖 Live LLM Stream</h3>
+                        <div class="llm-log" id="seniorLlmLog">
+                            <div class="llm-log-placeholder">Waiting for senior agent activity...</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Critic Agent Panel (Collapsible) -->
+            <section class="panel critic-panel">
+                <div class="panel-header collapsible" onclick="togglePanel('critic')">
+                    <h2>🔍 Critic Agent</h2>
+                    <span class="accordion-icon" id="criticAccordion">🔽</span>
+                </div>
+                <div class="panel-content" id="criticContent">
+                    <div class="critique-list" id="critiqueList">
+                        <p class="empty-state">No critiques yet</p>
+                    </div>
+                    <div class="llm-log-section">
+                        <h3>🤖 Live LLM Stream</h3>
+                        <div class="llm-log" id="criticLlmLog">
+                            <div class="llm-log-placeholder">Waiting for critic agent activity...</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Activity Log -->
+            <section class="panel activity-log">
+                <div class="panel-header">
+                    <h2>Activity Log</h2>
+                    <select id="eventFilter">
+                        <option value="">All Events</option>
+                        <option value="task_created">Task Created</option>
+                        <option value="task_assigned">Task Assigned</option>
+                        <option value="task_started">Task Started</option>
+                        <option value="task_completed">Task Completed</option>
+                        <option value="task_failed">Task Failed</option>
+                        <option value="task_halted">Task Halted</option>
+                        <option value="critique_received">Critique Received</option>
+                        <option value="problem_detected">Problem Detected</option>
+                        <option value="llm_prompt">LLM Prompt</option>
+                        <option value="llm_response">LLM Response</option>
+                    </select>
+                </div>
+                <div class="event-log" id="eventLog"></div>
+            </section>
+
+            <!-- Problems Panel -->
+            <section class="panel problems-panel">
+                <div class="panel-header">
+                    <h2>Problems</h2>
+                </div>
+                <div class="problem-list" id="problemList">
+                    <p class="empty-state">No problems detected</p>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Task Inspector Modal (Large) -->
+    <div class="modal" id="taskInspectorModal">
+        <div class="modal-content task-inspector-modal">
+            <div class="modal-header">
+                <h2>🔍 Task Inspector</h2>
+                <button class="close-btn" onclick="closeTaskInspector()">&times;</button>
+            </div>
+            <div class="modal-body" id="taskInspectorBody">
+                <!-- Content populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Detail Modal -->
+    <div class="modal" id="taskModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Task Details</h2>
+                <button class="close-btn" onclick="closeTaskModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="taskModalBody"></div>
+        </div>
+    </div>
+
+    <!-- New Task Modal -->
+    <div class="modal" id="newTaskModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Submit New Task</h2>
+                <button class="close-btn" onclick="closeNewTaskModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="newTaskForm">
+                    <div class="form-group">
+                        <label for="taskDescription">Task Description</label>
+                        <textarea id="taskDescription" rows="4" placeholder="Describe the task..." required></textarea>
+                    </div>
+                    <button type="submit" class="btn-submit">Submit Task</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Role Editor Modal -->
+    <div class="modal" id="roleModal">
+        <div class="modal-content role-modal-content">
+            <div class="modal-header">
+                <h2 id="roleModalTitle">Role Editor</h2>
+                <button class="close-btn" onclick="closeRoleModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="role-editor-toolbar">
+                    <button class="btn-role-save" onclick="saveRole()">💾 Save Changes</button>
+                    <button class="btn-role-reset" onclick="resetRole()">↩️ Reset</button>
+                </div>
+                <div class="form-group">
+                    <label for="roleContent">Role Content (Markdown)</label>
+                    <textarea id="roleContent" rows="20" placeholder="Loading..."></textarea>
+                </div>
+                <div class="role-editor-info">
+                    <span id="roleInfo"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/dashboard/static/js/app.js"></script>
+</body>
+</html>

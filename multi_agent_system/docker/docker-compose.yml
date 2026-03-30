@@ -1,0 +1,83 @@
+# PRAXIS-SENATE Docker Compose Configuration
+# Secure multi-agent orchestration
+
+version: '3.8'
+
+services:
+  # Main API Server
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../:/app
+      - agent_workspace:/workspace/agent_workspace
+    environment:
+      - AGENT_MODE=docker
+      - DOCKER_NETWORK=${DOCKER_NETWORK:-praxix_senate}
+    networks:
+      - praxix_senate
+    restart: unless-stopped
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Agent Executor Containers (dynamically spawned)
+  agent_executor:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    profiles:
+      - executor  # Only started when needed
+    volumes:
+      - agent_workspace:/workspace/agent_workspace:ro
+      - /tmp/agent_temp:/tmp/agent_temp:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # For nested docker if needed
+    networks:
+      - praxix_senate
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp/agent_temp:exec,mode=1777
+    environment:
+      - AGENT_HOME=/workspace/agent_workspace
+      - AGENT_TEMP=/tmp/agent_temp
+    restart: "no"
+    command: ["sleep", "infinity"]  # Keep container running until stopped
+
+  # Redis for message queue (if needed for distributed processing)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - praxix_senate
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  praxix_senate:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  agent_workspace:
+    driver: local
+  redis_data:
+    driver: local

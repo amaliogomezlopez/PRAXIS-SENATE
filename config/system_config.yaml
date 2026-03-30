@@ -1,0 +1,244 @@
+# Multi-Agent System Configuration
+
+system:
+  name: "MultiAgentSystem"
+  version: "1.0.0"
+  mode: "development"  # development | production
+  debug: true
+
+# Manager Agent Configuration
+manager:
+  agent_id: "senior-manager-001"
+  agent_type: "manager"
+  max_concurrent_tasks: 10
+  task_timeout_default: 300  # seconds
+  task_decomposition_strategy: "auto"  # auto | manual
+  gap_detection_enabled: true
+  auto_retry_enabled: true
+
+# Critic Agent Configuration
+critic:
+  enabled: false  # Set to true to enable critic agent
+  blocking: true  # Block execution until critique received
+  timeout_seconds: 30  # Timeout for critique generation
+
+# Worker Pool Configuration
+workers:
+  pool_size: 5
+  auto_scale:
+    enabled: true
+    min_workers: 2
+    max_workers: 20
+    scale_up_threshold: 0.8  # queue utilization (80%)
+    scale_down_threshold: 0.2  # queue utilization (20%)
+    scale_check_interval: 30  # seconds
+
+  # Worker Specializations
+  specializations:
+    - type: "code_editor"
+      count: 2
+      capabilities:
+        - "edit_file"
+        - "create_file"
+        - "refactor_code"
+        - "syntax_check"
+
+    - type: "researcher"
+      count: 1
+      capabilities:
+        - "web_search"
+        - "documentation_lookup"
+        - "api_research"
+
+    - type: "code_reviewer"
+      count: 1
+      capabilities:
+        - "code_review"
+        - "quality_check"
+        - "security_audit"
+        - "test_coverage"
+
+    - type: "file_manager"
+      count: 1
+      capabilities:
+        - "file_operations"
+        - "directory_management"
+        - "git_operations"
+
+# Communication Configuration
+communication:
+  backend: "inmemory"  # inmemory | redis | rabbitmq
+  message_retention_hours: 24
+  enable_message_persistence: true
+
+  # Topics
+  topics:
+    task_commands: "multi-agent.tasks.commands"
+    task_results: "multi-agent.tasks.results"
+    status_updates: "multi-agent.status.updates"
+    file_changes: "multi-agent.files.changes"
+    system_events: "multi-agent.system.events"
+
+  # Queue Settings
+  queue:
+    max_size: 1000
+    priority_levels: 3  # high, medium, low
+    enable_dead_letter: true
+    dead_letter_max_retries: 3
+
+# State Management Configuration
+state:
+  workspace_path: "/workspace"
+  state_dir: "/workspace/.multiagent"
+
+  # Event Log
+  event_log:
+    enabled: true
+    path: "/workspace/.multiagent/event_log.jsonl"
+    rotation_size_mb: 100
+    retention_days: 7
+
+  # Database
+  database:
+    type: "sqlite"  # sqlite | postgresql | memory
+    path: "/workspace/.multiagent/state.db"
+    connection_pool_size: 10
+
+  # Memory Store
+  memory:
+    type: "dict"  # dict | redis
+    max_context_size: 10000  # tokens
+    ttl_seconds: 3600
+
+  # File Tracking
+  file_tracking:
+    enabled: true
+    watch_patterns:
+      - "**/*.py"
+      - "**/*.js"
+      - "**/*.ts"
+      - "**/*.md"
+    ignore_patterns:
+      - ".git/**"
+      - "node_modules/**"
+      - "__pycache__/**"
+      - "*.pyc"
+
+# Error Handling Configuration
+error_handling:
+  max_retries: 3
+  retry_delay_seconds: 5
+  exponential_backoff: true
+  backoff_multiplier: 2
+
+  # Timeouts
+  timeouts:
+    task_execution: 300
+    worker_heartbeat: 30
+    dead_worker_detection: 120
+    message_acknowledgment: 10
+
+  # Conflict Resolution
+  file_conflicts:
+    strategy: "auto_merge"  # auto_merge | manual | reject
+    merge_timeout: 60
+    escalate_on_failure: true
+
+# Dashboard Configuration
+dashboard:
+  enabled: true
+  refresh_interval_ms: 500
+  theme: "default"  # default | dark | light
+
+  # Display Settings
+  display:
+    show_debug_logs: false
+    max_visible_tasks: 20
+    max_visible_logs: 100
+    compact_mode: false
+
+  # Panels
+  panels:
+    agents:
+      enabled: true
+      position: "left"
+      size: "30%"
+
+    task_queue:
+      enabled: true
+      position: "top-right"
+      size: "30%"
+
+    file_changes:
+      enabled: true
+      position: "middle"
+      size: "40%"
+
+    problems:
+      enabled: true
+      position: "middle"
+      size: "30%"
+
+    logs:
+      enabled: true
+      position: "bottom"
+      size: "30%"
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG | INFO | WARNING | ERROR
+  format: "%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s"
+  handlers:
+    - type: "console"
+      level: "INFO"
+    - type: "file"
+      level: "DEBUG"
+      path: "/workspace/.multiagent/system.log"
+      rotation: "daily"
+      retention_days: 7
+
+# Security Configuration
+security:
+  enable_sandboxing: true
+  allowed_operations:
+    - "read_file"
+    - "write_file"
+    - "execute_command"
+    - "network_request"
+
+  # Rate Limiting
+  rate_limiting:
+    enabled: true
+    max_requests_per_minute: 100
+    max_file_operations_per_minute: 50
+
+  # Permissions
+  permissions:
+    default_file_permissions: "0644"
+    default_dir_permissions: "0755"
+    restrict_system_paths: true
+    restricted_paths:
+      - "/etc"
+      - "/sys"
+      - "/proc"
+
+# Monitoring & Metrics
+monitoring:
+  enabled: true
+  metrics_interval_seconds: 60
+
+  # Metrics to track
+  metrics:
+    - "task_completion_rate"
+    - "task_failure_rate"
+    - "average_task_duration"
+    - "agent_utilization"
+    - "queue_depth"
+    - "message_throughput"
+    - "file_operations_count"
+
+# Extensions & Plugins
+extensions:
+  enabled: true
+  plugin_directory: "/workspace/.multiagent/plugins"
+  auto_load: false

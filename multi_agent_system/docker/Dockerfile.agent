@@ -1,0 +1,49 @@
+# PRAXIS-SENATE Agent Container
+# Secure, minimal container for agent execution
+
+FROM python:3.11-slim-bookworm
+
+# Prevent Python from writing pyc files and buffering stdout/stderr
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Security: Run as non-root user
+RUN groupadd --gid 1000 agent && \
+    useradd --uid 1000 --gid agent --shell /bin/bash --create-home agent
+
+# Install minimal dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    wget \
+    vim \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create restricted workspace
+RUN mkdir -p /workspace /workspace/agent_workspace /tmp/agent_temp && \
+    chown -R agent:agent /workspace /tmp/agent_temp
+
+# Set secure umask
+RUN echo "umask 0077" >> /home/agent/.bashrc
+
+# Working directory
+WORKDIR /workspace
+
+# Copy only necessary files (will be populated via volume mount)
+COPY --chown=agent:agent requirements.txt /workspace/
+RUN pip install --no-cache-dir -r requirements.txt 2>/dev/null || true
+
+# Switch to non-root user
+USER agent
+
+# Safety: Disable dangerous commands alias (advisory, not enforced)
+RUN echo "alias rm='rm -i' && echo 'Safe mode enabled'" >> /home/agent/.bashrc
+
+# Environment variables for agent safety
+ENV AGENT_HOME=/workspace/agent_workspace
+ENV AGENT_TEMP=/tmp/agent_temp
+ENV PATH="/home/agent/.local/bin:$PATH"
+
+# Default command - agent REPL mode
+CMD ["/bin/bash"]
