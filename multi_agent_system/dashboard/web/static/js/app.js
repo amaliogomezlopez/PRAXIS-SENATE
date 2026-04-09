@@ -1,5 +1,6 @@
 /**
- * PRAXIS-SENATE Dashboard JavaScript - Enhanced with Toast, Real-time Updates, and UI Polish
+ * PRAXIS-SENATE Dashboard v2.0 — Enhanced UX with phase indicators,
+ * typing animations, keyboard shortcuts, and smooth micro-interactions.
  */
 
 // State
@@ -15,6 +16,12 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 let currentRoleFilename = null;
 let originalRoleContent = null;
 
+// Agent phase tracking (keyed by agent id)
+const agentPhases = {};
+
+// Typing indicator state (keyed by log element id)
+const typingIndicators = {};
+
 // Toast notifications
 const toastContainer = document.getElementById('toastContainer');
 
@@ -26,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initWebSocket();
     loadInitialData();
     setupEventListeners();
+    setupKeyboardShortcuts();
     setupTaskPolling(); // Fallback polling
 });
 
@@ -92,8 +100,21 @@ function togglePanel(panelName) {
     const content = document.getElementById(`${panelName}Content`);
 
     if (header && content) {
+        const isCollapsing = !content.classList.contains('collapsed');
         header.classList.toggle('collapsed');
-        content.classList.toggle('collapsed');
+        if (isCollapsing) {
+            content.style.maxHeight = content.scrollHeight + 'px';
+            requestAnimationFrame(() => {
+                content.classList.add('collapsed');
+                content.style.maxHeight = '0';
+            });
+        } else {
+            content.classList.remove('collapsed');
+            content.style.maxHeight = content.scrollHeight + 'px';
+            content.addEventListener('transitionend', () => {
+                content.style.maxHeight = '';
+            }, { once: true });
+        }
     }
 }
 
@@ -296,11 +317,118 @@ function handleLlmEvent(event) {
     const agent = event.source || event.data?.agent;
     const taskId = event.data?.task_id;
 
+    // Track agent phase based on event type
+    if (agent) {
+        updateAgentPhase(agent, event.type, event.data);
+    }
+
     if (agent === 'senior_agent' || agent === 'senior') {
+        showTypingIndicator('seniorLlmLog');
         renderLlmEntry('seniorLlmLog', event);
     } else if (agent === 'critic_agent' || agent === 'critic') {
+        showTypingIndicator('criticLlmLog');
         renderLlmEntry('criticLlmLog', event);
     }
+}
+
+// ==================== TYPING INDICATOR ====================
+function showTypingIndicator(logId) {
+    const log = document.getElementById(logId);
+    if (!log) return;
+
+    // Remove any existing typing indicator
+    removeTypingIndicator(logId);
+
+    const indicator = document.createElement('div');
+    indicator.className = 'typing-indicator';
+    indicator.id = `typing-${logId}`;
+    indicator.innerHTML = `
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+    `;
+    log.appendChild(indicator);
+    log.scrollTo({ top: log.scrollHeight, behavior: 'smooth' });
+
+    // Auto-remove after 8s if no new events
+    typingIndicators[logId] = setTimeout(() => removeTypingIndicator(logId), 8000);
+}
+
+function removeTypingIndicator(logId) {
+    const existing = document.getElementById(`typing-${logId}`);
+    if (existing) existing.remove();
+    if (typingIndicators[logId]) {
+        clearTimeout(typingIndicators[logId]);
+        delete typingIndicators[logId];
+    }
+}
+
+// ==================== AGENT PHASE TRACKING ====================
+function updateAgentPhase(agentId, eventType, data) {
+    let phase = null;
+
+    switch (eventType) {
+        case 'task_decomposed':
+        case 'agent_thinking':
+            phase = data?.action === 'decompose' ? 'decomposing' : 'processing';
+            break;
+        case 'task_assigned':
+            phase = 'assigning';
+            break;
+        case 'llm_prompt':
+            phase = 'processing';
+            break;
+        case 'llm_response':
+            phase = 'reviewing';
+            break;
+        case 'critique_received':
+        case 'critique_request':
+            phase = 'reviewing';
+            break;
+        case 'task_completed':
+        case 'task_failed':
+            phase = null; // Clear phase
+            break;
+    }
+
+    if (phase !== undefined) {
+        agentPhases[agentId] = phase;
+        renderAgentPhaseIndicators();
+    }
+}
+
+function renderAgentPhaseIndicators() {
+    document.querySelectorAll('.agent-card').forEach(card => {
+        const agentIdEl = card.querySelector('.agent-id');
+        if (!agentIdEl) return;
+        const agentId = agentIdEl.textContent.trim().split('\n').pop().trim();
+
+        // Remove existing phase indicator
+        const existing = card.querySelector('.phase-indicator');
+        if (existing) existing.remove();
+
+        const phase = agentPhases[agentId];
+        if (!phase) return;
+
+        const phaseLabels = {
+            decomposing: 'Decomposing',
+            assigning: 'Assigning',
+            processing: 'Processing',
+            reviewing: 'Reviewing'
+        };
+
+        const indicator = document.createElement('div');
+        indicator.className = `phase-indicator ${phase}`;
+        indicator.innerHTML = `<span class=\"phase-dot\"></span>${phaseLabels[phase] || phase}`;
+
+        // Insert after the agent-status element
+        const statusEl = card.querySelector('.agent-status');
+        if (statusEl) {
+            statusEl.insertAdjacentElement('afterend', indicator);
+        } else {
+            card.appendChild(indicator);
+        }
+    });
 }
 
 function renderLlmEntry(logId, event) {
@@ -311,22 +439,30 @@ function renderLlmEntry(logId, event) {
     const placeholder = log.querySelector('.llm-log-placeholder');
     if (placeholder) placeholder.remove();
 
+    // Remove typing indicator since we have real content now
+    removeTypingIndicator(logId);
+
     const entry = document.createElement('div');
     entry.className = `llm-entry ${getLlmEntryClass(event.type)}`;
 
     const typeLabel = getLlmEntryTypeLabel(event.type);
-    const content = getLlmEntryContent(event);
+    const rawContent = getLlmEntryContent(event);
+    const highlightedContent = highlightCodeBlocks(escapeHtml(rawContent));
 
     entry.innerHTML = `
         <div class="llm-entry-header">
             <span class="llm-entry-type">${typeLabel}</span>
             <span class="llm-entry-time">${formatTime(event.timestamp)}</span>
         </div>
-        <div class="llm-entry-content" id="llm-content-${Date.now()}">${escapeHtml(content)}</div>
+        <div class="llm-entry-content" id="llm-content-${Date.now()}">${highlightedContent}</div>
     `;
 
     log.appendChild(entry);
-    log.scrollTop = log.scrollHeight;
+
+    // Smooth auto-scroll to bottom
+    requestAnimationFrame(() => {
+        log.scrollTo({ top: log.scrollHeight, behavior: 'smooth' });
+    });
 
     // Limit entries
     while (log.children.length > 50) {
@@ -381,6 +517,66 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+/**
+ * Highlight code blocks and JSON inside LLM log entries.
+ * Transforms ```code``` blocks and JSON structures into styled elements.
+ */
+function highlightCodeBlocks(html) {
+    if (!html) return '';
+
+    // Highlight ```lang\n...\n``` fenced code blocks
+    html = html.replace(
+        /```(\w*)\n([\s\S]*?)```/g,
+        (_, lang, code) => {
+            const highlighted = syntaxHighlight(code, lang || 'text');
+            return `<div class="code-block"><div class="code-block-header">${lang || 'code'}</div><pre class="code-block-content">${highlighted}</pre></div>`;
+        }
+    );
+
+    // Highlight inline `code`
+    html = html.replace(
+        /`([^`]+)`/g,
+        '<code class="inline-code">$1</code>'
+    );
+
+    // Highlight JSON structures {...} when on their own
+    html = html.replace(
+        /^(\s*)\{([\s\S]*?)\}$/gm,
+        (match) => {
+            try {
+                // Verify it looks like JSON
+                if (match.includes('"') && (match.includes(':') || match.includes(','))) {
+                    return `<span class="json-highlight">${match}</span>`;
+                }
+            } catch (e) {}
+            return match;
+        }
+    );
+
+    return html;
+}
+
+/**
+ * Basic syntax highlighting for code in LLM logs
+ */
+function syntaxHighlight(code, lang) {
+    // Highlight keywords
+    const keywords = /\b(def|class|import|from|return|if|else|elif|for|while|try|except|finally|with|as|async|await|function|const|let|var|new|this|true|false|null|None|True|False)\b/g;
+    code = code.replace(keywords, '<span class="sh-keyword">$1</span>');
+
+    // Highlight strings
+    code = code.replace(/((&quot;|&#39;|&apos;)[^&]*?\2)/g, '<span class="sh-string">$1</span>');
+
+    // Highlight comments
+    code = code.replace(/(#.*)$/gm, '<span class="sh-comment">$1</span>');
+    code = code.replace(/(\/\/.*)$/gm, '<span class="sh-comment">$1</span>');
+
+    // Highlight numbers
+    code = code.replace(/\b(\d+\.?\d*)\b/g, '<span class="sh-number">$1</span>');
+
+    return code;
 }
 
 function handleTaskEvent(event) {
@@ -524,15 +720,15 @@ function renderAgents() {
     }
 
     const agentAvatars = {
-        senior: '👑',
-        worker: '⚙️',
-        critic: '🔍'
+        senior: 'S',
+        worker: 'W',
+        critic: 'C'
     };
 
     agents.forEach(agent => {
         const card = document.createElement('div');
         const statusClass = agent.status === 'idle' ? 'idle' : (agent.status === 'running' ? 'busy' : '');
-        const avatar = agentAvatars[agent.type?.toLowerCase()] || '🤖';
+        const avatar = agentAvatars[agent.type?.toLowerCase()] || '?';
 
         card.className = `agent-card ${statusClass}`;
 
@@ -554,17 +750,20 @@ function renderAgents() {
                 ${agent.status || 'idle'}
             </div>
             <div class="agent-stats">
-                <span>📋 ${agent.tasks_completed || 0}</span>
-                <span>📍 ${agent.current_task || '-'}</span>
+                <span>Tasks: ${agent.tasks_completed || 0}</span>
+                <span>Current: ${agent.current_task ? agent.current_task.substring(0, 8) + '...' : '-'}</span>
             </div>
             <div class="agent-actions">
-                <button class="btn-pause" onclick="pauseAgent('${agent.id}')">⏸ Pause</button>
-                <button class="btn-resume" onclick="resumeAgent('${agent.id}')">▶ Resume</button>
+                <button class="btn-pause" onclick="pauseAgent('${agent.id}')">Pause</button>
+                <button class="btn-resume" onclick="resumeAgent('${agent.id}')">Resume</button>
             </div>
         `;
 
         grid.appendChild(card);
     });
+
+    // Render phase indicators for active agents
+    renderAgentPhaseIndicators();
 }
 
 function handleCritiqueReceived(data) {
@@ -637,22 +836,22 @@ function addActivityLogItem(event) {
     const iconClass = (event.type || 'unknown').replace(/_/g, '-').toLowerCase();
 
     const eventIcons = {
-        task_created: '📝',
-        task_assigned: '👤',
-        task_started: '▶️',
-        task_completed: '✅',
-        task_failed: '❌',
-        task_halted: '⏸',
-        task_resumed: '▶️',
-        critique_received: '🔍',
-        problem_detected: '⚠️',
-        agent_message: '💬',
-        llm_prompt: '📤',
-        llm_response: '📥',
-        agent_thinking: '💭',
-        task_decomposed: '📋',
-        critique_request: '🔎',
-        task_feedback: '💬'
+        task_created: '+',
+        task_assigned: '\u2192',
+        task_started: '\u25b6',
+        task_completed: '\u2713',
+        task_failed: '\u2717',
+        task_halted: '\u2016',
+        task_resumed: '\u25b6',
+        critique_received: '\u25c6',
+        problem_detected: '!',
+        agent_message: '\u2026',
+        llm_prompt: '\u2191',
+        llm_response: '\u2193',
+        agent_thinking: '\u223c',
+        task_decomposed: '\u2261',
+        critique_request: '\u25c7',
+        task_feedback: '\u2709'
     };
 
     item.innerHTML = `
@@ -1067,6 +1266,9 @@ async function openRoleModal(filename) {
 
     modal.classList.add('active');
     closeSidebar();
+
+    // Load template variables panel
+    loadTemplateVars(filename);
 }
 
 function closeRoleModal() {
@@ -1109,6 +1311,72 @@ async function saveRole() {
     } catch (error) {
         info.innerHTML = `<span class="role-error">✗ Error: ${error.message}</span>`;
         showToast('error', 'Error', 'Failed to connect to server');
+    }
+}
+
+// ==================== TEMPLATE VARIABLES ====================
+
+async function loadTemplateVars(filename) {
+    const panel = document.getElementById('roleVarsPanel');
+    const container = document.getElementById('roleVarsContainer');
+
+    try {
+        const res = await fetch(`${API_BASE}/api/roles/${filename}/variables`);
+        if (!res.ok) { panel.style.display = 'none'; return; }
+        const data = await res.json();
+
+        if (!data.variables || data.variables.length === 0) {
+            panel.style.display = 'none';
+            return;
+        }
+
+        container.innerHTML = data.variables.map(v => `
+            <div class="role-var-row">
+                <label>${v.name}</label>
+                <input type="text"
+                       data-var="${escapeHtml(v.name)}"
+                       value="${escapeHtml(String(v.current))}"
+                       placeholder="${escapeHtml(String(v.default))}" />
+                <span class="var-badge">${typeof v.default === 'number' ? 'num' : 'str'}</span>
+            </div>
+        `).join('');
+
+        panel.style.display = 'block';
+    } catch (e) {
+        panel.style.display = 'none';
+    }
+}
+
+async function saveTemplateVars() {
+    if (!currentRoleFilename) return;
+
+    const inputs = document.querySelectorAll('#roleVarsContainer input[data-var]');
+    const variables = {};
+    inputs.forEach(inp => {
+        const val = inp.value.trim();
+        const numVal = Number(val);
+        variables[inp.dataset.var] = (!isNaN(numVal) && val !== '') ? numVal : val;
+    });
+
+    try {
+        const res = await fetch(`${API_BASE}/api/roles/${currentRoleFilename}/variables`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ variables })
+        });
+        if (res.ok) {
+            showToast('success', 'Variables Applied', 'Template variables updated successfully');
+            // Reload the rendered content to reflect changes
+            const rendered = await fetch(`${API_BASE}/api/roles/${currentRoleFilename}/rendered`);
+            if (rendered.ok) {
+                const data = await rendered.json();
+                document.getElementById('roleContent').value = data.content;
+            }
+        } else {
+            showToast('error', 'Error', 'Failed to save template variables');
+        }
+    } catch (e) {
+        showToast('error', 'Error', `Connection error: ${e.message}`);
     }
 }
 
@@ -1201,4 +1469,36 @@ async function submitTask(description) {
         showToast('error', 'Error', 'Failed to connect to server');
     }
     return null;
+}
+
+// ==================== KEYBOARD SHORTCUTS ====================
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        // Don't trigger shortcuts when typing in inputs/textareas
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+            return;
+        }
+
+        // Ctrl/Cmd + K → New Task
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            openNewTaskModal();
+            return;
+        }
+
+        // S → Toggle sidebar
+        if (e.key === 's' && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            toggleSidebar();
+            return;
+        }
+
+        // R → Refresh data
+        if (e.key === 'r' && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            loadInitialData();
+            showToast('info', 'Refreshed', 'Dashboard data reloaded');
+            return;
+        }
+    });
 }

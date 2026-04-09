@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PRAXIS-SENATE Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/dashboard/static/css/main.css">
 </head>
 <body>
@@ -144,8 +147,8 @@
             <!-- Senior Agent Panel (Collapsible) -->
             <section class="panel senior-panel">
                 <div class="panel-header collapsible" onclick="togglePanel('senior')">
-                    <h2>👑 Senior Agent</h2>
-                    <span class="accordion-icon" id="seniorAccordion">🔽</span>
+                    <h2>Senior Agent</h2>
+                    <span class="accordion-icon" id="seniorAccordion">▾</span>
                 </div>
                 <div class="panel-content" id="seniorContent">
                     <div class="info-row">
@@ -157,7 +160,7 @@
                         <span class="value" id="qualityScore">-</span>
                     </div>
                     <div class="llm-log-section">
-                        <h3>🤖 Live LLM Stream</h3>
+                        <h3>Live LLM Stream</h3>
                         <div class="llm-log" id="seniorLlmLog">
                             <div class="llm-log-placeholder">Waiting for senior agent activity...</div>
                         </div>
@@ -168,15 +171,15 @@
             <!-- Critic Agent Panel (Collapsible) -->
             <section class="panel critic-panel">
                 <div class="panel-header collapsible" onclick="togglePanel('critic')">
-                    <h2>🔍 Critic Agent</h2>
-                    <span class="accordion-icon" id="criticAccordion">🔽</span>
+                    <h2>Critic Agent</h2>
+                    <span class="accordion-icon" id="criticAccordion">▾</span>
                 </div>
                 <div class="panel-content" id="criticContent">
                     <div class="critique-list" id="critiqueList">
                         <p class="empty-state">No critiques yet</p>
                     </div>
                     <div class="llm-log-section">
-                        <h3>🤖 Live LLM Stream</h3>
+                        <h3>Live LLM Stream</h3>
                         <div class="llm-log" id="criticLlmLog">
                             <div class="llm-log-placeholder">Waiting for critic agent activity...</div>
                         </div>
@@ -221,7 +224,7 @@
     <div class="modal" id="taskInspectorModal">
         <div class="modal-content task-inspector-modal">
             <div class="modal-header">
-                <h2>🔍 Task Inspector</h2>
+                <h2>Task Inspector</h2>
                 <button class="close-btn" onclick="closeTaskInspector()">&times;</button>
             </div>
             <div class="modal-body" id="taskInspectorBody">
@@ -268,6 +271,16 @@
                 <button class="close-btn" onclick="closeRoleModal()">&times;</button>
             </div>
             <div class="modal-body">
+                <!-- Template Variables Panel -->
+                <div class="role-variables-panel" id="roleVarsPanel" style="display:none;">
+                    <h4>Template Variables</h4>
+                    <div id="roleVarsContainer"></div>
+                    <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem;">
+                        <button class="btn-role-save" onclick="saveTemplateVars()" style="font-size: 0.75rem; padding: 0.3rem 0.75rem;">Apply Variables</button>
+                        <button class="btn-role-reset" onclick="loadTemplateVars(currentRoleFilename)" style="font-size: 0.75rem; padding: 0.3rem 0.75rem;">Reset Defaults</button>
+                    </div>
+                </div>
+
                 <div class="role-editor-toolbar">
                     <button class="btn-role-save" onclick="saveRole()">💾 Save Changes</button>
                     <button class="btn-role-reset" onclick="resetRole()">↩️ Reset</button>
