@@ -28,13 +28,21 @@ const toastContainer = document.getElementById('toastContainer');
 // API Base URL
 const API_BASE = window.location.origin;
 
+// Elapsed timer interval
+let elapsedTimerInterval = null;
+
+// Search state
+let searchQuery = '';
+
 // Initialize dashboard
 document.addEventListener('DOMContentLoaded', () => {
     initWebSocket();
     loadInitialData();
     setupEventListeners();
     setupKeyboardShortcuts();
-    setupTaskPolling(); // Fallback polling
+    setupDragAndDrop();
+    startElapsedTimers();
+    requestNotificationPermission();
 });
 
 // ==================== TOAST SYSTEM ====================
@@ -51,8 +59,8 @@ function showToast(type, title, message, duration = 4000) {
     toast.innerHTML = `
         <div class="toast-icon">${icons[type] || 'ℹ'}</div>
         <div class="toast-content">
-            <div class="toast-title">${title}</div>
-            <div class="toast-message">${message}</div>
+            <div class="toast-title">${escapeHtml(title)}</div>
+            <div class="toast-message">${escapeHtml(message)}</div>
         </div>
         <button class="toast-close" onclick="dismissToast(this.parentElement)">&times;</button>
     `;
@@ -130,12 +138,14 @@ function initWebSocket() {
             console.log('WebSocket connected');
             updateSystemStatus('connected');
             reconnectAttempts = 0;
+            stopPollingFallback();
             ws.send('subscribe:tasks');
         };
 
         ws.onclose = () => {
             console.log('WebSocket disconnected');
             updateSystemStatus('disconnected');
+            startPollingFallback();
             handleReconnect();
         };
 
@@ -194,21 +204,25 @@ function updateSystemStatus(status) {
     }
 }
 
-// Fallback polling
+// Fallback polling — only active when WebSocket is disconnected
 let pollingInterval = null;
 
-function setupTaskPolling() {
+function startPollingFallback() {
     if (pollingInterval) return;
-
     pollingInterval = setInterval(async () => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            try {
-                await loadTasks();
-            } catch (error) {
-                console.error('Polling error:', error);
-            }
+        try {
+            await loadTasks();
+        } catch (error) {
+            console.error('Polling error:', error);
         }
     }, 5000);
+}
+
+function stopPollingFallback() {
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
+    }
 }
 
 // ==================== DATA LOADING ====================
@@ -272,10 +286,10 @@ function updateTaskHistory() {
         const desc = task.description || 'Untitled Task';
         const time = task.completed_at ? formatTime(task.completed_at) : '-';
         return `
-            <div class="history-item" onclick="showTaskInspector('${task.id}')">
-                <span class="history-status ${task.status}"></span>
-                <span class="history-desc" title="${desc}">${desc.substring(0, 30)}${desc.length > 30 ? '...' : ''}</span>
-                <span class="history-time">${time}</span>
+            <div class="history-item" onclick="showTaskInspector('${escapeHtml(task.id)}')">
+                <span class="history-status ${escapeHtml(task.status)}"></span>
+                <span class="history-desc" title="${escapeHtml(desc)}">${escapeHtml(desc.substring(0, 30))}${desc.length > 30 ? '...' : ''}</span>
+                <span class="history-time">${escapeHtml(time)}</span>
             </div>
         `;
     }).join('');
@@ -296,12 +310,15 @@ function handleEvent(event) {
             break;
         case 'task_completed':
             showToast('success', 'Task Completed', event.data?.task_id || 'Task finished');
+            sendDesktopNotification('Task Completed ✓', event.data?.description?.substring(0, 80) || 'A task finished successfully', 'task-' + event.data?.task_id);
             break;
         case 'task_failed':
             showToast('error', 'Task Failed', event.data?.error || 'Task failed', 6000);
+            sendDesktopNotification('Task Failed ✗', event.data?.error?.substring(0, 80) || 'A task has failed', 'task-' + event.data?.task_id);
             break;
         case 'task_halted':
             showToast('warning', 'Task Halted', event.data?.task_id || 'Task halted by human', 6000);
+            sendDesktopNotification('Task Halted ⏸', 'A task was halted and needs attention', 'task-' + event.data?.task_id);
             break;
         case 'problem_detected':
             handleProblemDetected(event.data || event);
@@ -616,8 +633,8 @@ function handleProblemDetected(data) {
     item.className = 'problem-item';
 
     item.innerHTML = `
-        <span class="severity-badge ${data.severity || 'medium'}">${data.severity || 'medium'}</span>
-        <span class="problem-desc">${data.description || JSON.stringify(data)}</span>
+        <span class="severity-badge ${escapeHtml(data.severity || 'medium')}">${escapeHtml(data.severity || 'medium')}</span>
+        <span class="problem-desc">${escapeHtml(data.description || JSON.stringify(data))}</span>
         <span class="problem-time">${formatTime(data.timestamp || new Date())}</span>
     `;
 
@@ -649,6 +666,17 @@ function renderTasks() {
         filteredTasks = tasks.filter(t => t.status === filter);
     }
 
+    // Apply search query
+    if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        filteredTasks = filteredTasks.filter(t =>
+            (t.description || '').toLowerCase().includes(q) ||
+            (t.assigned_to || '').toLowerCase().includes(q) ||
+            (t.id || '').toLowerCase().includes(q) ||
+            (t.type || '').toLowerCase().includes(q)
+        );
+    }
+
     const counts = { pending: 0, in_progress: 0, completed: 0, failed: 0, halted: 0 };
 
     filteredTasks.forEach(task => {
@@ -665,6 +693,32 @@ function renderTasks() {
             columns[status].count.textContent = counts[status];
         }
     });
+
+    // Add per-column empty states
+    const emptyMessages = {
+        pending: { icon: '📥', text: 'No pending tasks', action: true },
+        in_progress: { icon: '⚡', text: 'No tasks in progress', action: false },
+        completed: { icon: '✅', text: 'No completed tasks yet', action: false },
+        failed: { icon: '🌟', text: 'No failed tasks \u2014 great!', action: false },
+        halted: { icon: '⏸\ufe0f', text: 'No halted tasks', action: false }
+    };
+
+    Object.keys(columns).forEach(status => {
+        if (counts[status] === 0 && columns[status].el.children.length === 0) {
+            const empty = emptyMessages[status];
+            const el = document.createElement('div');
+            el.className = 'column-empty-state';
+            el.innerHTML = `
+                <div class="empty-icon">${empty.icon}</div>
+                <div class="empty-text">${empty.text}</div>
+                ${empty.action ? '<button class="btn-create-task" onclick="openNewTaskModal()">+ Create Task</button>' : ''}
+            `;
+            columns[status].el.appendChild(el);
+        }
+    });
+
+    // Update global stats bar
+    updateGlobalStats();
 }
 
 function createTaskCard(task) {
@@ -687,18 +741,33 @@ function createTaskCard(task) {
     const agentId = task.assigned_to || 'Unassigned';
     const agentInitial = agentId.charAt(0).toUpperCase();
 
+    // Elapsed timer for in-progress tasks
+    let durationHtml;
+    if (task.started_at && !task.completed_at && task.status === 'in_progress') {
+        const elapsed = getElapsedSeconds(task.started_at);
+        durationHtml = `<span class="elapsed-timer" data-started="${escapeHtml(task.started_at)}"><span class="timer-dot"></span>${formatElapsed(elapsed)}</span>`;
+    } else {
+        durationHtml = escapeHtml(duration);
+    }
+
+    card.setAttribute('draggable', 'true');
+    card.setAttribute('data-task-id', id);
+    card.setAttribute('role', 'listitem');
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('aria-label', `Task: ${escapeHtml(desc.substring(0, 60))} — Status: ${task.status}`);
+
     card.innerHTML = `
         <div class="task-header">
-            <span class="task-id">${id.substring(0, 12)}...</span>
+            <span class="task-id">${escapeHtml(id.substring(0, 12))}...</span>
             <span class="task-agent">
-                <span class="task-agent-badge">${agentInitial}</span>
-                ${agentId}
+                <span class="task-agent-badge">${escapeHtml(agentInitial)}</span>
+                ${escapeHtml(agentId)}
             </span>
         </div>
-        <div class="task-desc">${desc.substring(0, 60)}${desc.length > 60 ? '...' : ''}</div>
+        <div class="task-desc">${escapeHtml(desc.substring(0, 60))}${desc.length > 60 ? '...' : ''}</div>
         <div class="task-meta">
-            <span>${duration}</span>
-            <span>${task.type || 'task'}</span>
+            <span>${durationHtml}</span>
+            <span>${escapeHtml(task.type || 'task')}</span>
         </div>
     `;
 
@@ -740,22 +809,22 @@ function renderAgents() {
                 <div class="agent-info">
                     <div class="agent-id">
                         <span class="status-dot ${statusDotClass}"></span>
-                        ${agent.id}
+                        ${escapeHtml(agent.id)}
                     </div>
-                    <div class="agent-type">${agent.type}</div>
+                    <div class="agent-type">${escapeHtml(agent.type)}</div>
                 </div>
             </div>
-            <div class="agent-status ${agent.status}">
+            <div class="agent-status ${escapeHtml(agent.status)}">
                 <span class="status-dot ${statusDotClass}"></span>
-                ${agent.status || 'idle'}
+                ${escapeHtml(agent.status || 'idle')}
             </div>
             <div class="agent-stats">
                 <span>Tasks: ${agent.tasks_completed || 0}</span>
-                <span>Current: ${agent.current_task ? agent.current_task.substring(0, 8) + '...' : '-'}</span>
+                <span>Current: ${agent.current_task ? escapeHtml(agent.current_task.substring(0, 8)) + '...' : '-'}</span>
             </div>
             <div class="agent-actions">
-                <button class="btn-pause" onclick="pauseAgent('${agent.id}')">Pause</button>
-                <button class="btn-resume" onclick="resumeAgent('${agent.id}')">Resume</button>
+                <button class="btn-pause" onclick="pauseAgent('${escapeHtml(agent.id)}')">Pause</button>
+                <button class="btn-resume" onclick="resumeAgent('${escapeHtml(agent.id)}')">Resume</button>
             </div>
         `;
 
@@ -780,17 +849,17 @@ function handleCritiqueReceived(data) {
 
     item.innerHTML = `
         <div class="critique-header">
-            <span class="critique-task-id">Task: ${data.task_id}</span>
+            <span class="critique-task-id">Task: ${escapeHtml(data.task_id)}</span>
             <span class="critique-status ${data.approved ? 'approved' : 'rejected'}">
                 ${data.approved ? '✓ APPROVED' : '✗ REJECTED'}
             </span>
         </div>
-        <div class="critique-reasoning">${data.reasoning || 'No reasoning provided'}</div>
+        <div class="critique-reasoning">${escapeHtml(data.reasoning || 'No reasoning provided')}</div>
         ${data.confidence ? `
             <div class="critique-confidence">
                 Confidence: ${(data.confidence * 100).toFixed(0)}%
                 <div class="confidence-bar">
-                    <div class="confidence-fill" style="width: ${data.confidence * 100}%"></div>
+                    <div class="confidence-fill" style="width: ${Math.min(data.confidence * 100, 100)}%"></div>
                 </div>
             </div>
         ` : ''}
@@ -900,15 +969,15 @@ function showTaskModal(task) {
     body.innerHTML = `
         <div class="info-row">
             <span class="label">Task ID:</span>
-            <span class="value" style="font-family: monospace;">${task.id}</span>
+            <span class="value" style="font-family: monospace;">${escapeHtml(task.id)}</span>
         </div>
         <div class="info-row">
             <span class="label">Status:</span>
-            <span class="value">${task.status}</span>
+            <span class="value">${escapeHtml(task.status)}</span>
         </div>
         <div class="info-row">
             <span class="label">Assigned To:</span>
-            <span class="value">${task.assigned_to || 'Unassigned'}</span>
+            <span class="value">${escapeHtml(task.assigned_to || 'Unassigned')}</span>
         </div>
         <div class="info-row">
             <span class="label">Created:</span>
@@ -1002,8 +1071,8 @@ function renderTaskInspector(task) {
             <div class="subtask-inspector-item">
                 <span class="subtask-number">${i + 1}</span>
                 <div class="subtask-inspector-content">
-                    <div class="subtask-inspector-title">${st.description || st.title || JSON.stringify(st)}</div>
-                    <div class="subtask-inspector-meta">${st.agent_id ? `Agent: ${st.agent_id}` : ''} ${st.status ? `• Status: ${st.status}` : ''}</div>
+                    <div class="subtask-inspector-title">${escapeHtml(st.description || st.title || JSON.stringify(st))}</div>
+                    <div class="subtask-inspector-meta">${st.agent_id ? `Agent: ${escapeHtml(st.agent_id)}` : ''} ${st.status ? `• Status: ${escapeHtml(st.status)}` : ''}</div>
                 </div>
             </div>
         `).join('')
@@ -1013,25 +1082,32 @@ function renderTaskInspector(task) {
         ? task.commands.map(cmd => `
             <div class="command-item">
                 <div class="command-time">${formatTime(cmd.timestamp || cmd.time)}</div>
-                <div style="margin-top: 0.25rem;">${cmd.command || cmd}</div>
-                ${cmd.output ? `<div style="color: var(--text-secondary); margin-top: 0.25rem; font-size: 0.75rem;">Output: ${cmd.output.substring(0, 100)}...</div>` : ''}
+                <div style="margin-top: 0.25rem;">${escapeHtml(String(cmd.command || cmd))}</div>
+                ${cmd.output ? `<div style="color: var(--text-secondary); margin-top: 0.25rem; font-size: 0.75rem;">Output: ${escapeHtml(cmd.output.substring(0, 100))}...</div>` : ''}
             </div>
         `).join('')
         : '<p class="empty-state">No commands executed</p>';
 
+    // Retry button for failed tasks
+    const retryButtonHtml = task.status === 'failed' ? `
+        <div class="inspector-section">
+            <button class="btn-retry" onclick="retryTask('${escapeHtml(task.id)}')">🔄 Retry Task</button>
+        </div>
+    ` : '';
+
     body.innerHTML = `
         <div class="inspector-header">
             <div>
-                <span class="inspector-task-id">${task.id}</span>
-                <h2 class="inspector-title">${task.description || 'Task Details'}</h2>
+                <span class="inspector-task-id">${escapeHtml(task.id)}</span>
+                <h2 class="inspector-title">${escapeHtml(task.description || 'Task Details')}</h2>
             </div>
-            <span class="inspector-status ${statusClass}">${statusLabel.toUpperCase()}</span>
+            <span class="inspector-status ${escapeHtml(statusClass)}">${escapeHtml(statusLabel).toUpperCase()}</span>
         </div>
 
         <div class="inspector-grid">
             <div class="inspector-field">
                 <div class="inspector-field-label">Assigned To</div>
-                <div class="inspector-field-value">${task.assigned_to || 'Unassigned'}</div>
+                <div class="inspector-field-value">${escapeHtml(task.assigned_to || 'Unassigned')}</div>
             </div>
             <div class="inspector-field">
                 <div class="inspector-field-label">Created</div>
@@ -1066,16 +1142,18 @@ function renderTaskInspector(task) {
         ${task.result ? `
             <div class="inspector-section">
                 <h3>📊 Result</h3>
-                <pre class="inspector-commands" style="max-height: 200px;">${JSON.stringify(task.result, null, 2)}</pre>
+                <pre class="inspector-commands" style="max-height: 200px;">${escapeHtml(JSON.stringify(task.result, null, 2))}</pre>
             </div>
         ` : ''}
 
         ${task.error ? `
             <div class="inspector-section" style="color: var(--error);">
                 <h3>❌ Error</h3>
-                <div class="inspector-description">${task.error}</div>
+                <div class="inspector-description">${escapeHtml(task.error)}</div>
             </div>
         ` : ''}
+
+        ${retryButtonHtml}
 
         ${task.comments && task.comments.length > 0 ? `
             <div class="inspector-section">
@@ -1084,7 +1162,7 @@ function renderTaskInspector(task) {
                     ${task.comments.filter(c => c.agent_id === 'human').map(c => `
                         <div style="background: var(--bg-secondary); padding: 0.75rem; border-radius: 6px; margin-bottom: 0.5rem; border-left: 3px solid #9b59b6;">
                             <div style="font-size: 0.75rem; color: #9b59b6; margin-bottom: 0.25rem;">👤 HUMAN at ${formatTime(c.timestamp)}</div>
-                            <div style="font-size: 0.9rem;">${c.content}</div>
+                            <div style="font-size: 0.9rem;">${escapeHtml(c.content)}</div>
                         </div>
                     `).join('')}
                 </div>
@@ -1438,6 +1516,9 @@ function setupEventListeners() {
         if (e.target.closest('.sidebar')) return;
         closeSidebar();
     });
+
+    // Setup search
+    setupSearch();
 }
 
 // ==================== NEW TASK MODAL ====================
@@ -1500,5 +1581,289 @@ function setupKeyboardShortcuts() {
             showToast('info', 'Refreshed', 'Dashboard data reloaded');
             return;
         }
+    });
+}
+
+// ==================== DRAG AND DROP ====================
+function setupDragAndDrop() {
+    const columns = document.querySelectorAll('.kanban-column');
+    columns.forEach(col => {
+        col.addEventListener('dragover', handleDragOver);
+        col.addEventListener('dragenter', handleDragEnter);
+        col.addEventListener('dragleave', handleDragLeave);
+        col.addEventListener('drop', handleDrop);
+    });
+
+    // Delegate drag events on task cards
+    document.getElementById('taskBoard').addEventListener('dragstart', (e) => {
+        const card = e.target.closest('.task-card');
+        if (!card) return;
+        card.classList.add('dragging');
+        e.dataTransfer.setData('text/plain', card.dataset.taskId);
+        e.dataTransfer.effectAllowed = 'move';
+    });
+
+    document.getElementById('taskBoard').addEventListener('dragend', (e) => {
+        const card = e.target.closest('.task-card');
+        if (card) card.classList.remove('dragging');
+        document.querySelectorAll('.kanban-column.drag-over').forEach(c => c.classList.remove('drag-over'));
+        document.querySelectorAll('.drop-placeholder').forEach(p => p.remove());
+    });
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+}
+
+function handleDragEnter(e) {
+    e.preventDefault();
+    const column = e.currentTarget;
+    column.classList.add('drag-over');
+
+    // Add placeholder if not present
+    const taskList = column.querySelector('.task-list');
+    if (taskList && !taskList.querySelector('.drop-placeholder')) {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'drop-placeholder';
+        placeholder.textContent = 'Drop here to move task';
+        taskList.appendChild(placeholder);
+    }
+}
+
+function handleDragLeave(e) {
+    // Only remove if leaving the column entirely
+    const column = e.currentTarget;
+    if (!column.contains(e.relatedTarget)) {
+        column.classList.remove('drag-over');
+        const placeholder = column.querySelector('.drop-placeholder');
+        if (placeholder) placeholder.remove();
+    }
+}
+
+async function handleDrop(e) {
+    e.preventDefault();
+    const column = e.currentTarget;
+    column.classList.remove('drag-over');
+    const placeholder = column.querySelector('.drop-placeholder');
+    if (placeholder) placeholder.remove();
+
+    const taskId = e.dataTransfer.getData('text/plain');
+    const newStatus = column.dataset.status;
+
+    if (!taskId || !newStatus) return;
+
+    // Find old status
+    const task = tasks.find(t => t.id === taskId);
+    if (!task || task.status === newStatus) return;
+
+    // Optimistically update local state
+    const oldStatus = task.status;
+    task.status = newStatus;
+    renderTasks();
+
+    try {
+        const res = await fetch(`${API_BASE}/api/tasks/${taskId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus })
+        });
+
+        if (res.ok) {
+            showToast('success', 'Task Moved', `Moved to ${newStatus.replace('_', ' ')}`);
+            await loadTasks();
+        } else {
+            // Rollback
+            task.status = oldStatus;
+            renderTasks();
+            showToast('error', 'Move Failed', 'Could not update task status');
+        }
+    } catch (err) {
+        task.status = oldStatus;
+        renderTasks();
+        showToast('error', 'Error', 'Failed to connect to server');
+    }
+}
+
+// ==================== RETRY TASK ====================
+async function retryTask(taskId) {
+    try {
+        // Try dedicated retry endpoint first
+        const res = await fetch(`${API_BASE}/api/tasks/${taskId}/retry`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            showToast('success', 'Task Retried', `New task created: ${data.task_id.substring(0, 12)}...`);
+            closeTaskInspector();
+            await loadTasks();
+            return;
+        }
+
+        // Fallback: re-submit with same description
+        const task = tasks.find(t => t.id === taskId);
+        if (!task) {
+            showToast('error', 'Error', 'Task not found');
+            return;
+        }
+
+        const fallbackRes = await fetch(`${API_BASE}/api/tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: task.description })
+        });
+
+        if (fallbackRes.ok) {
+            const data = await fallbackRes.json();
+            showToast('success', 'Task Retried', `New task created: ${data.task_id.substring(0, 12)}...`);
+            closeTaskInspector();
+            await loadTasks();
+        } else {
+            showToast('error', 'Error', 'Failed to retry task');
+        }
+    } catch (e) {
+        console.error('Failed to retry task:', e);
+        showToast('error', 'Error', 'Failed to connect to server');
+    }
+}
+
+// ==================== ELAPSED TIME COUNTERS ====================
+function getElapsedSeconds(startedAt) {
+    if (!startedAt) return 0;
+    return Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+}
+
+function formatElapsed(totalSeconds) {
+    if (totalSeconds < 0) totalSeconds = 0;
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+}
+
+function startElapsedTimers() {
+    // Update all elapsed timers every second
+    if (elapsedTimerInterval) clearInterval(elapsedTimerInterval);
+    elapsedTimerInterval = setInterval(() => {
+        document.querySelectorAll('.elapsed-timer[data-started]').forEach(el => {
+            const started = el.dataset.started;
+            if (started) {
+                const elapsed = getElapsedSeconds(started);
+                // Update only the text node (keep the dot)
+                const dot = el.querySelector('.timer-dot');
+                el.textContent = '';
+                if (dot) el.appendChild(dot);
+                el.append(formatElapsed(elapsed));
+            }
+        });
+    }, 1000);
+}
+
+// ==================== GLOBAL STATS BAR ====================
+function updateGlobalStats() {
+    let statsBar = document.getElementById('globalStatsBar');
+    if (!statsBar) return;
+
+    const total = tasks.length;
+    const inProgress = tasks.filter(t => t.status === 'in_progress').length;
+    const completed = tasks.filter(t => t.status === 'completed').length;
+    const failed = tasks.filter(t => t.status === 'failed').length;
+    const halted = tasks.filter(t => t.status === 'halted').length;
+    const pending = tasks.filter(t => t.status === 'pending').length;
+    const successRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    // Calculate average duration for completed tasks
+    let avgDuration = '-';
+    const completedTasks = tasks.filter(t => t.status === 'completed' && t.started_at && t.completed_at);
+    if (completedTasks.length > 0) {
+        const totalMs = completedTasks.reduce((sum, t) => sum + (new Date(t.completed_at) - new Date(t.started_at)), 0);
+        const avgSeconds = Math.floor(totalMs / completedTasks.length / 1000);
+        avgDuration = formatElapsed(avgSeconds);
+    }
+
+    statsBar.innerHTML = `
+        <div class="stat-item"><span class="stat-icon">📋</span> Tasks: <span class="stat-value">${total}</span></div>
+        <div class="stat-divider"></div>
+        <div class="stat-item"><span class="stat-icon">⏳</span> Pending: <span class="stat-value">${pending}</span></div>
+        <div class="stat-item"><span class="stat-icon">⚡</span> Active: <span class="stat-value">${inProgress}</span></div>
+        <div class="stat-item"><span class="stat-icon">✅</span> Done: <span class="stat-value">${completed}</span></div>
+        <div class="stat-item"><span class="stat-icon">❌</span> Failed: <span class="stat-value">${failed}</span></div>
+        ${halted > 0 ? `<div class="stat-item"><span class="stat-icon">⏸️</span> Halted: <span class="stat-value">${halted}</span></div>` : ''}
+        <div class="stat-divider"></div>
+        <div class="stat-item">Success: <span class="stat-value">${successRate}%</span></div>
+        <div class="stat-item">Avg: <span class="stat-value">${avgDuration}</span></div>
+    `;
+}
+
+// ==================== DESKTOP NOTIFICATIONS ====================
+let notificationsEnabled = false;
+
+function requestNotificationPermission() {
+    if (!('Notification' in window)) return;
+
+    if (Notification.permission === 'granted') {
+        notificationsEnabled = true;
+        return;
+    }
+
+    if (Notification.permission === 'default') {
+        // Show a prompt banner
+        const banner = document.getElementById('notificationBanner');
+        if (banner) banner.style.display = 'flex';
+    }
+}
+
+function enableNotifications() {
+    Notification.requestPermission().then(perm => {
+        notificationsEnabled = perm === 'granted';
+        const banner = document.getElementById('notificationBanner');
+        if (banner) banner.style.display = 'none';
+        if (notificationsEnabled) {
+            showToast('success', 'Notifications', 'Desktop notifications enabled');
+        }
+    });
+}
+
+function dismissNotificationBanner() {
+    const banner = document.getElementById('notificationBanner');
+    if (banner) banner.style.display = 'none';
+}
+
+function sendDesktopNotification(title, body, tag) {
+    if (!notificationsEnabled) return;
+    try {
+        const notif = new Notification(title, {
+            body: body,
+            tag: tag || 'praxis-senate',
+            icon: '/dashboard/static/img/icon.png',
+            silent: false
+        });
+        notif.onclick = () => {
+            window.focus();
+            notif.close();
+        };
+        // Auto-close after 8s
+        setTimeout(() => notif.close(), 8000);
+    } catch (e) {
+        // Ignore notification errors
+    }
+}
+
+// ==================== TASK SEARCH ====================
+function setupSearch() {
+    const searchInput = document.getElementById('taskSearch');
+    if (!searchInput) return;
+
+    let debounceTimer = null;
+    searchInput.addEventListener('input', (e) => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            searchQuery = e.target.value.trim();
+            renderTasks();
+        }, 200);
     });
 }

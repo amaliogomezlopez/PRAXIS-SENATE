@@ -298,3 +298,24 @@ async def update_task_partial(task_id: str, request: Request):
         "status": "updated",
         "task_id": task_id
     }
+
+
+@router.post("/{task_id}/retry")
+async def retry_task(task_id: str, request: Request):
+    """Retry a failed task by creating a new task with the same description"""
+    api: APISystem = request.app.state.api_system
+    if not api or not api.senior_agent:
+        raise HTTPException(status_code=503, detail="System not initialized")
+
+    task = await api.state_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status != TaskStatus.FAILED:
+        raise HTTPException(status_code=400, detail="Only failed tasks can be retried")
+
+    try:
+        new_task_id = await api.senior_agent.submit_user_task(task.description)
+        return {"task_id": new_task_id, "status": "retried", "original_task_id": task_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

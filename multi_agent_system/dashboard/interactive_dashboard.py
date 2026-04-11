@@ -123,24 +123,30 @@ class InteractiveDashboard:
                 logger.error(f"Error in auto-refresh: {e}")
 
     async def _command_loop(self):
-        """Interactive command loop"""
+        """Interactive command loop — continuously shows menu"""
         while self._running:
             try:
-                await asyncio.sleep(0.5)
-
-                if self.console.is_terminal:
-                    # Check for user input (non-blocking)
-                    continue
+                await self.show_menu()
             except asyncio.CancelledError:
+                break
+            except EOFError:
                 break
             except Exception as e:
                 logger.error(f"Error in command loop: {e}")
+                self.console.print(f"[red]Error: {e}[/]")
 
     def _display_status(self):
-        """Display current system status"""
-        # This would update a live display
-        # For now, we'll just log periodic updates
-        pass
+        """Display current system status summary"""
+        try:
+            msg_count = len(self._messages)
+            latest = self._messages[-1] if self._messages else None
+            status_line = f"[dim]Events: {msg_count}"
+            if latest:
+                status_line += f" | Last: {latest['message'][:40]}"
+            status_line += "[/]"
+            self.console.print(status_line)
+        except Exception:
+            pass
 
     async def show_menu(self):
         """Show interactive menu"""

@@ -36,6 +36,18 @@
             </div>
         </header>
 
+        <!-- Notification Permission Banner -->
+        <div class="notification-prompt" id="notificationBanner" style="display:none;">
+            <span>🔔 Enable desktop notifications to get alerts when tasks complete or fail.</span>
+            <button onclick="enableNotifications()">Enable</button>
+            <button class="dismiss-notif" onclick="dismissNotificationBanner()">&times;</button>
+        </div>
+
+        <!-- Global Stats Bar -->
+        <div class="stats-bar" id="globalStatsBar">
+            <div class="stat-item">Loading stats...</div>
+        </div>
+
         <!-- Lateral Sidebar -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-section">
@@ -87,7 +99,10 @@
                 <div class="panel-header">
                     <h2>Task Board</h2>
                     <div class="filter-controls">
-                        <select id="taskFilter">
+                        <div class="search-bar">
+                            <input type="text" id="taskSearch" placeholder="Search tasks..." aria-label="Search tasks">
+                        </div>
+                        <select id="taskFilter" aria-label="Filter by status">
                             <option value="">All Status</option>
                             <option value="pending">Pending</option>
                             <option value="in_progress">In Progress</option>
@@ -97,41 +112,41 @@
                         </select>
                     </div>
                 </div>
-                <div class="kanban-columns" id="taskBoard">
-                    <div class="kanban-column" data-status="pending">
+                <div class="kanban-columns" id="taskBoard" role="list" aria-label="Task board">
+                    <div class="kanban-column" data-status="pending" role="group" aria-label="Pending tasks">
                         <div class="column-header">
                             <h3>Pending</h3>
                             <span class="count" id="pendingCount">0</span>
                         </div>
-                        <div class="task-list" id="pendingTasks"></div>
+                        <div class="task-list" id="pendingTasks" role="list"></div>
                     </div>
-                    <div class="kanban-column" data-status="in_progress">
+                    <div class="kanban-column" data-status="in_progress" role="group" aria-label="In progress tasks">
                         <div class="column-header">
                             <h3>In Progress</h3>
                             <span class="count" id="inProgressCount">0</span>
                         </div>
-                        <div class="task-list" id="inProgressTasks"></div>
+                        <div class="task-list" id="inProgressTasks" role="list"></div>
                     </div>
-                    <div class="kanban-column" data-status="completed">
+                    <div class="kanban-column" data-status="completed" role="group" aria-label="Completed tasks">
                         <div class="column-header">
                             <h3>Completed</h3>
                             <span class="count" id="completedCount">0</span>
                         </div>
-                        <div class="task-list" id="completedTasks"></div>
+                        <div class="task-list" id="completedTasks" role="list"></div>
                     </div>
-                    <div class="kanban-column" data-status="failed">
+                    <div class="kanban-column" data-status="failed" role="group" aria-label="Failed tasks">
                         <div class="column-header">
                             <h3>Failed</h3>
                             <span class="count" id="failedCount">0</span>
                         </div>
-                        <div class="task-list" id="failedTasks"></div>
+                        <div class="task-list" id="failedTasks" role="list"></div>
                     </div>
-                    <div class="kanban-column" data-status="halted">
+                    <div class="kanban-column" data-status="halted" role="group" aria-label="Halted tasks">
                         <div class="column-header">
                             <h3>Halted</h3>
                             <span class="count" id="haltedCount">0</span>
                         </div>
-                        <div class="task-list" id="haltedTasks"></div>
+                        <div class="task-list" id="haltedTasks" role="list"></div>
                     </div>
                 </div>
             </section>
