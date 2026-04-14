@@ -264,7 +264,7 @@ IMPORTANT:
                 "action": "generate_critique",
                 "system_prompt": self._system_prompt[:500] + "..." if len(self._system_prompt) > 500 else self._system_prompt,
                 "user_prompt": prompt[:1000] + "..." if len(prompt) > 1000 else prompt,
-                "model": result.get("provider", "unknown")
+                "model": "pending"
             })
 
             # Emit thinking event
@@ -292,6 +292,10 @@ IMPORTANT:
 
             if critique_data is None:
                 raise ValueError("Failed to extract valid JSON critique from LLM response")
+
+            # Type guard: extract_json may return a str instead of dict
+            if not isinstance(critique_data, dict):
+                raise ValueError(f"LLM response parsed as {type(critique_data).__name__}, expected dict. Raw: {str(critique_data)[:100]}")
 
             return CritiqueResult(
                 critic_id=self.agent_id,

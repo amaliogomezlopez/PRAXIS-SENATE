@@ -2,6 +2,7 @@
 Multi-Agent System - Extended Version
 Main entry point with LLM integration, roles, and interactive dashboard
 """
+import argparse
 import asyncio
 import logging
 import os
@@ -31,8 +32,13 @@ logger = logging.getLogger(__name__)
 class MultiAgentSystem:
     """Main system orchestrator"""
 
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, execution_mode: str = None, workspace: str = None):
         self.config = load_config(config_path)
+
+        # Execution mode: CLI args override config
+        exec_config = self.config.get("execution", {})
+        self.execution_mode = execution_mode or exec_config.get("mode", "docker")
+        self.workspace = workspace or exec_config.get("workspace", "") or None
 
         # Core components
         self.event_bus = EventBus()
@@ -185,6 +191,9 @@ class MultiAgentSystem:
     async def initialize(self, num_workers: int = 3):
         """Initialize the system"""
         logger.info("Initializing Multi-Agent System...")
+        logger.info(f"Execution mode: {self.execution_mode}")
+        if self.workspace:
+            logger.info(f"Workspace: {self.workspace}")
 
         # Get critic config
         critic_config = self.config.get("critic", {})
@@ -218,7 +227,9 @@ class MultiAgentSystem:
                 event_bus=self.event_bus,
                 state_manager=self.state_manager,
                 file_ops=self.file_ops,
-                web_tools=self.web_tools
+                web_tools=self.web_tools,
+                execution_mode=self.execution_mode,
+                workspace=self.workspace
             )
             self.workers.append(worker)
             self.manager.add_worker(worker)
@@ -237,6 +248,9 @@ class MultiAgentSystem:
         """Start the system"""
         logger.info("Starting Multi-Agent System...")
 
+        # Start event bus
+        event_bus_task = asyncio.create_task(self.event_bus.start())
+
         # Start manager
         manager_task = asyncio.create_task(self.manager.run())
 
@@ -248,18 +262,34 @@ class MultiAgentSystem:
         if self.critic:
             critic_task = asyncio.create_task(self.critic.run())
 
+        # Start periodic cleanup for long-running sessions
+        cleanup_task = asyncio.create_task(self._periodic_cleanup())
+
         # Start dashboard in interactive mode
         dashboard_task = asyncio.create_task(self._run_dashboard())
 
         # Wait for all tasks
         try:
+            all_tasks = [event_bus_task, manager_task, *worker_tasks, cleanup_task, dashboard_task]
             if critic_task:
-                await asyncio.gather(manager_task, *worker_tasks, critic_task, dashboard_task)
-            else:
-                await asyncio.gather(manager_task, *worker_tasks, dashboard_task)
+                all_tasks.append(critic_task)
+            await asyncio.gather(*all_tasks)
         except KeyboardInterrupt:
             logger.info("Shutting down...")
             await self.stop()
+
+    async def _periodic_cleanup(self):
+        """Periodically clean up old state to prevent memory leaks in long-running sessions"""
+        cleanup_interval = 300  # 5 minutes
+        while True:
+            try:
+                await asyncio.sleep(cleanup_interval)
+                await self.state_manager.cleanup_completed_tasks(keep_recent=100)
+                logger.debug("Periodic state cleanup completed")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"Cleanup error (non-fatal): {e}")
 
     async def _run_dashboard(self):
         """Run dashboard in menu mode"""
@@ -296,16 +326,33 @@ class MultiAgentSystem:
         if self.dashboard:
             self.dashboard.stop()
 
+        self.event_bus.stop()
+
         logger.info("System stopped")
 
 
 async def main():
     """Main entry point"""
+    parser = argparse.ArgumentParser(description="PRAXIS-SENATE Multi-Agent System")
+    parser.add_argument("--mode", choices=["docker", "direct"], default=None,
+                        help="Execution mode: 'docker' (isolated) or 'direct' (host filesystem)")
+    parser.add_argument("--workspace", type=str, default=None,
+                        help="Path to project workspace (used in direct mode)")
+    parser.add_argument("--workers", type=int, default=3,
+                        help="Number of worker agents (default: 3)")
+    parser.add_argument("--config", type=str, default=None,
+                        help="Path to config YAML file")
+    args = parser.parse_args()
+
     # Create system
-    system = MultiAgentSystem()
+    system = MultiAgentSystem(
+        config_path=args.config,
+        execution_mode=args.mode,
+        workspace=args.workspace
+    )
 
     # Initialize
-    await system.initialize(num_workers=3)
+    await system.initialize(num_workers=args.workers)
 
     # Start
     await system.start()

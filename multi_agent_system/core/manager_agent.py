@@ -258,23 +258,35 @@ class ManagerAgent(AgentBase):
         await self._log(f"Problem detected: {problem.description}", "warning")
 
     async def _check_parent_completion(self, parent_task: Task):
-        """Verificar si todas las subtareas están completadas"""
-        all_completed = True
+        """Verificar si todas las subtareas están completadas.
+
+        Only marks parent as FAILED when ALL subtasks have reached a terminal
+        state and at least one failed. This prevents premature failure when
+        some subtasks are still running.
+        """
+        all_terminal = True
         any_failed = False
+        all_completed = True
 
         for subtask_id in parent_task.subtasks:
             subtask = await self.state_manager.get_task(subtask_id)
             if subtask:
-                if subtask.status != TaskStatus.COMPLETED:
+                is_terminal = subtask.status in (TaskStatus.COMPLETED, TaskStatus.FAILED)
+                if not is_terminal:
+                    all_terminal = False
                     all_completed = False
-                if subtask.status == TaskStatus.FAILED:
+                elif subtask.status == TaskStatus.FAILED:
                     any_failed = True
+                    all_completed = False
+                # COMPLETED is fine
+            else:
+                all_terminal = False
+                all_completed = False
 
         if all_completed:
-            # Analizar resultados
+            # All subtasks succeeded — analyze and complete parent
             await self._analyze_results(parent_task)
 
-            # Marcar como completada
             await self.state_manager.update_task(
                 parent_task.id,
                 status=TaskStatus.COMPLETED,
@@ -284,11 +296,22 @@ class ManagerAgent(AgentBase):
             await self._log(f"Parent task completed: {parent_task.id}")
             await self._publish_progress(f"Completed: {parent_task.description}", 1.0)
 
-        elif any_failed:
+        elif all_terminal and any_failed:
+            # All subtasks finished but at least one failed
+            failed_ids = []
+            for sid in parent_task.subtasks:
+                st = await self.state_manager.get_task(sid)
+                if st and st.status == TaskStatus.FAILED:
+                    failed_ids.append(sid)
+
             await self.state_manager.update_task(
                 parent_task.id,
                 status=TaskStatus.FAILED,
-                error="One or more subtasks failed"
+                error=f"Subtasks failed: {', '.join(failed_ids)}"
+            )
+            await self._log(
+                f"Parent task failed: {parent_task.id} "
+                f"({len(failed_ids)}/{len(parent_task.subtasks)} subtasks failed)"
             )
 
     async def _analyze_results(self, task: Task):

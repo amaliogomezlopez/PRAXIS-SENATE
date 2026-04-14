@@ -300,6 +300,17 @@ async def update_task_partial(task_id: str, request: Request):
     }
 
 
+@router.get("/experiments/results")
+async def get_experiment_results(request: Request, limit: int = 20):
+    """Get recent experiment results (autoresearch-style tracking)"""
+    from core.experiment_tracker import ExperimentTracker
+    tracker = ExperimentTracker()
+    return {
+        "results": tracker.get_recent(n=limit),
+        "summary": tracker.get_summary(),
+    }
+
+
 @router.post("/{task_id}/retry")
 async def retry_task(task_id: str, request: Request):
     """Retry a failed task by creating a new task with the same description"""

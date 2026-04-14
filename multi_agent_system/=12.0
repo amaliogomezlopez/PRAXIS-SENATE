@@ -1,7 +1,0 @@
-ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
-gradio 5.23.0 requires pillow<12.0,>=8.0, but you have pillow 12.1.1 which is incompatible.
-gradio 5.23.0 requires starlette<1.0,>=0.40.0; sys_platform != "emscripten", but you have starlette 1.0.0 which is incompatible.
-gradio-litmodel3d 0.0.1 requires gradio<5.0,>=4.0, but you have gradio 5.23.0 which is incompatible.
-
-[notice] A new release of pip is available: 25.3 -> 26.0.1
-[notice] To update, run: python.exe -m pip install --upgrade pip

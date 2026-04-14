@@ -1,169 +1,127 @@
 ![Senado de Praxis](https://i.postimg.cc/9MPcZn6S/PRAXIS-SENATE.png)
 
-# Sistema Multi-Agente Profesional
+# PRAXIS SENATE — Multi-Agent Orchestration System
 
-Un sistema de orquestación multi-agente con arquitectura Manager-Worker, comunicación asíncrona event-driven, y dashboard CLI visual.
+An autonomous multi-agent system with LLM-powered task decomposition, real-time web dashboard, human-in-the-loop controls, and experiment tracking. Built for long-running, loop-based autonomous operation.
 
-## 🚀 Inicio Rápido
-
-### Ejecutar el Sistema
+## Quick Start
 
 ```bash
-# Ejecutar ejemplo integrado
-python code/main.py
+cd multi_agent_system
 
-# Ejecutar con request personalizado
-python code/main.py "Implement authentication system"
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure LLM providers
+cp .env.example .env   # Add your API keys
+
+# Run with web dashboard (default: Docker-isolated execution)
+python main_extended.py
+
+# Run in direct mode on an existing project
+python main_extended.py --mode direct --workspace /path/to/project
 ```
 
-### Uso Programático
+The web dashboard opens at `http://localhost:8000`. Use the API or dashboard to submit tasks.
 
-```python
-from main import MultiAgentSystem
-import asyncio
-
-async def main():
-    system = MultiAgentSystem()
-    await system.run("Tu tarea aquí")
-    await system.shutdown()
-
-asyncio.run(main())
-```
-
-## 📁 Estructura del Proyecto
+## Architecture
 
 ```
-/workspace/
-├── config/
-│   └── system_config.yaml         # Configuración del sistema
-├── code/
-│   ├── models.py                  # Data models (Task, Agent, Message)
-│   ├── message_bus.py             # Event Bus / Messaging
-│   ├── manager_agent.py           # Senior Manager (Orquestador)
-│   ├── worker_agent.py            # Workers especializados
-│   └── main.py                    # Entry point / Sistema integrado
-├── docs/
-│   ├── architecture_design.md     # Diseño arquitectónico detallado
-│   ├── architecture_diagrams.md   # Diagramas Mermaid completos
-│   └── cli_dashboard_design.md    # Mockup del dashboard CLI
-└── REPORTE_FINAL_SISTEMA_MULTIAGENTE.md  # 📖 REPORTE COMPLETO
+SeniorAgent (LLM-powered decomposition + analysis)
+  ├── CriticAgent (optional review gate)
+  ├── WorkerAgent 1 (file ops, web, commands)
+  ├── WorkerAgent 2
+  └── WorkerAgent N
+      │
+      └── DockerAgentExecutor (isolated) or Direct Mode (host FS)
+
+EventBus (async pub/sub with backpressure)
+StateManager (SQLite WAL + in-memory, periodic cleanup)
+ExperimentTracker (TSV + JSONL result logging)
 ```
 
-## 📖 Documentación
+## Execution Modes
 
-### Reporte Principal
-**[REPORTE_FINAL_SISTEMA_MULTIAGENTE.md](REPORTE_FINAL_SISTEMA_MULTIAGENTE.md)**
+| Mode | Flag | Isolation | Use Case |
+|------|------|-----------|----------|
+| Docker | `--mode docker` (default) | Full container isolation | Untrusted tasks, experimentation |
+| Direct | `--mode direct --workspace PATH` | None (host filesystem) | Working on your own projects |
 
-Este documento contiene:
-- ✅ Respuestas a todas las preguntas sobre comunicación, estado, orquestación
-- ✅ Diagrama de arquitectura
-- ✅ Diseño del dashboard CLI (mockup)
-- ✅ Estructura de datos completa
-- ✅ Flujo de trabajo detallado
-- ✅ Código base implementado
-- ✅ Consideraciones de escalabilidad
+## Key Features
 
-### Documentos Técnicos
+- **LLM-powered task decomposition** — SeniorAgent breaks tasks into subtasks using configurable LLM providers (OpenAI, Anthropic, Google, MiniMax, OpenRouter)
+- **Human-in-the-loop** — Halt tasks, inject feedback, resume. Workers incorporate HITL feedback into LLM prompts
+- **CriticAgent** — Optional blocking review that can reject and force re-decomposition
+- **Real-time dashboard** — Web UI with SSE events, drag-and-drop, live stats
+- **Experiment tracking** — Autoresearch-inspired TSV/JSONL logging of task outcomes (keep/discard/crash)
+- **Circuit breaker** — Workers back off exponentially on repeated failures
+- **Memory management** — Periodic cleanup of completed tasks, bounded queues, capped correction history
 
-1. **[docs/architecture_design.md](docs/architecture_design.md)**
-   - Patrones de arquitectura
-   - Protocolo de mensajes
-   - Estado compartido
-   - Manejo de errores
-   - Escalabilidad
+## API
 
-2. **[docs/architecture_diagrams.md](docs/architecture_diagrams.md)**
-   - Diagrama de arquitectura general
-   - Flujo de comunicación
-   - Estados de tarea
-   - Componentes del sistema
-   - Flujo de trabajo
-   - Manejo de errores
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/tasks` | POST | Submit a task |
+| `/api/tasks` | GET | List tasks (filter by status/agent) |
+| `/api/tasks/{id}` | GET | Task details |
+| `/api/tasks/{id}/halt` | POST | Halt a running task |
+| `/api/tasks/{id}/feedback` | POST | Inject human feedback |
+| `/api/tasks/{id}/resume` | POST | Resume halted task |
+| `/api/tasks/experiments/results` | GET | Experiment tracking data |
+| `/api/events/stream` | GET | SSE event stream |
+| `/api/agents` | GET | Agent status |
 
-3. **[docs/cli_dashboard_design.md](docs/cli_dashboard_design.md)**
-   - Mockup completo del dashboard CLI
-   - Paneles y componentes visuales
-   - Colores, iconos, progress bars
-   - Interactividad y atajos de teclado
+## CLI Options
 
-## ⚙️ Configuración
+```
+python main_extended.py [OPTIONS]
 
-Editar `config/system_config.yaml`:
-
-```yaml
-manager:
-  max_concurrent_tasks: 10
-
-workers:
-  pool_size: 5
-  auto_scale:
-    enabled: true
-    min_workers: 2
-    max_workers: 20
+  --mode {docker,direct}   Execution mode (default: docker)
+  --workspace PATH         Project path for direct mode
+  --workers N              Number of worker agents (default: 3)
+  --config PATH            Custom config YAML path
 ```
 
-## 🎯 Características Principales
+## Configuration
 
-- ✅ **1 Agente Senior (Manager)**: Orquestador inteligente
-- ✅ **Sub-Agentes (Workers)**: Especializados y escalables
-- ✅ **Comunicación Asíncrona**: Event Bus con Pub/Sub
-- ✅ **Estado Compartido**: Multi-tier (Filesystem + DB + Memory)
-- ✅ **Dashboard CLI**: Visual con progress bars, iconos, colores
-- ✅ **Manejo de Errores**: Retry automático, circuit breakers
-- ✅ **Escalabilidad**: Auto-scaling horizontal
-
-## 🔧 Extender con Nuevos Workers
-
-```python
-from worker_agent import WorkerAgent
-
-class CustomWorker(WorkerAgent):
-    def __init__(self, agent_id, message_bus, config):
-        super().__init__(
-            agent_id=agent_id,
-            specialization="custom_type",
-            capabilities=["capability1", "capability2"],
-            message_bus=message_bus,
-            config=config
-        )
-
-    async def _perform_work(self, task: Task) -> Dict:
-        # Tu lógica aquí
-        return {"result": "success"}
+Environment variables (`.env`):
+```
+MINIMAX_API_KEY=your_key
+OPENAI_API_KEY=your_key
+ANTHROPIC_API_KEY=your_key
 ```
 
-## 📊 Componentes del Sistema
+See `config/providers.yaml` for full provider, critic, and execution configuration.
 
-### Message Bus
-- Comunicación asíncrona Pub/Sub
-- Consumer groups para balanceo
-- Priority queues
-- Event sourcing para replay
+## Project Structure
 
-### Manager Agent
-- Descomposición de tareas
-- Orquestación de workers
-- Análisis de gaps
-- Monitoreo de progreso
+```
+multi_agent_system/
+  ├── main_extended.py         # CLI entry point
+  ├── api/                     # FastAPI server + routes
+  ├── core/                    # EventBus, StateManager, Agents, ExperimentTracker
+  ├── llm/                     # Multi-provider LLM manager
+  ├── roles/                   # Agent role definitions (.md prompts)
+  ├── tools/                   # File operations, web tools
+  ├── docker/                  # Docker executor + compose
+  ├── dashboard/               # Web + CLI dashboards
+  └── data/                    # SQLite DB, experiment logs
+docs/
+  ├── usage-guide.md           # Comprehensive how-to guide
+  ├── architecture.md          # System architecture
+  ├── diagrams.md              # Architecture diagrams
+  ├── quickstart.md            # Quick start guide
+  └── ...                      # Extended docs, QA reports
+```
 
-### Worker Agents
-- Especializados (code_editor, researcher, reviewer)
-- Ejecución paralela
-- Status reporting
-- Heartbeat mechanism
+## Documentation
 
-## 🚀 Próximos Pasos
+- **[Usage Guide](docs/usage-guide.md)** — Full setup, configuration, and usage instructions
+- **[Architecture](docs/architecture.md)** — System design and component interactions
+- **[Quick Start](docs/quickstart.md)** — Get running in minutes
+- **[Extended Guide](docs/extended-guide.md)** — Deep dive into features
+- **[Audit Report](docs/audit-report.md)** — Security and quality audit findings
 
-1. Implementar dashboard CLI con Rich/Textual
-2. Agregar más workers especializados
-3. Integrar con LLMs para descomposición inteligente
-4. Dashboard web con React + WebSockets
-5. Deploy a Kubernetes
+## License
 
-## 📝 Licencia
-
-© 2026 - Sistema Multi-Agente Profesional
-
----
-
-**Para documentación completa, ver:** [REPORTE_FINAL_SISTEMA_MULTIAGENTE.md](REPORTE_FINAL_SISTEMA_MULTIAGENTE.md)
+© 2026 PRAXIS SENATE

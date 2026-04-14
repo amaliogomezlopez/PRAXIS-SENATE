@@ -82,7 +82,7 @@ class SafeCommandValidator:
     }
 
     @classmethod
-    def is_command_safe(cls, command: str, allow_dangerous: bool = False) -> tuple[bool, str]:
+    def is_command_safe(cls, command: str, allow_dangerous: bool = False, direct_mode: bool = False) -> tuple[bool, str]:
         """
         Check if command is safe to execute.
         Returns (is_safe, reason)
@@ -95,6 +95,15 @@ class SafeCommandValidator:
             return False, "Empty command"
 
         cmd = parts[0]
+
+        # In direct mode, skip whitelist but still block destructive patterns
+        if direct_mode:
+            if cmd in cls.DANGEROUS_COMMANDS and not allow_dangerous:
+                dangerous_flags = cls.DANGEROUS_COMMANDS[cmd]
+                for part in parts[1:]:
+                    if part in dangerous_flags:
+                        return False, f"Dangerous flag '{part}' for command '{cmd}' blocked even in direct mode"
+            return True, "Direct mode: command allowed"
 
         # Check if command is in whitelist
         if cmd not in cls.ALLOWED_COMMANDS:
@@ -119,21 +128,31 @@ class SafeCommandValidator:
 
 
 class DockerAgentExecutor:
-    """Executes agent commands in isolated Docker containers"""
+    """Executes agent commands in isolated Docker containers or directly on host"""
 
     # Local workspace directory (mounted into containers)
     LOCAL_WORKSPACE = Path(__file__).parent.parent / "agent_workspace"
 
-    def __init__(self, image: str = "praxix-senate-agent:latest"):
+    def __init__(self, image: str = "praxix-senate-agent:latest", mode: str = "docker", workspace: str = None):
         self.image = image
+        self.mode = mode  # "docker" or "direct"
         self.client: Optional[docker.DockerClient] = None
         self._initialized = False
+
+        # Set workspace
+        if workspace:
+            self.LOCAL_WORKSPACE = Path(workspace)
         # Ensure local workspace directory exists
         self.LOCAL_WORKSPACE.mkdir(parents=True, exist_ok=True)
 
     async def initialize(self):
         """Initialize Docker client"""
         if self._initialized:
+            return
+
+        if self.mode == "direct":
+            logger.info(f"Direct mode enabled, workspace: {self.LOCAL_WORKSPACE}")
+            self._initialized = True
             return
 
         try:
@@ -173,7 +192,8 @@ class DockerAgentExecutor:
         # Validate command
         is_safe, reason = SafeCommandValidator.is_command_safe(
             command,
-            allow_dangerous=config.allow_dangerous
+            allow_dangerous=config.allow_dangerous,
+            direct_mode=(self.mode == "direct")
         )
 
         if not is_safe:
@@ -187,9 +207,15 @@ class DockerAgentExecutor:
             )
 
         # Check if Docker is available
-        if not self._initialized or not self.client:
-            logger.warning("Docker not available, running locally")
-            return await self._execute_locally(command, start_time, timeout=config.timeout_seconds)
+        if self.mode == "direct" or not self._initialized or not self.client:
+            if self.mode == "direct":
+                logger.info("Direct mode: executing locally in workspace")
+            else:
+                logger.warning("Docker not available, running locally")
+            return await self._execute_locally(
+                command, start_time, timeout=config.timeout_seconds,
+                cwd=str(self.LOCAL_WORKSPACE)
+            )
 
         container_id = str(uuid.uuid4())[:12]
         container = None
@@ -270,13 +296,14 @@ class DockerAgentExecutor:
                 container_id=""
             )
 
-    async def _execute_locally(self, command: str, start_time, timeout: int = 30) -> ExecutionResult:
+    async def _execute_locally(self, command: str, start_time, timeout: int = 30, cwd: str = None) -> ExecutionResult:
         """Fallback local execution (not recommended for production)"""
         try:
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd
             )
 
             try:

@@ -2,10 +2,13 @@
 Sistema de eventos para comunicación entre agentes
 """
 import asyncio
+import logging
 from typing import Dict, List, Callable, Any
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class EventType(Enum):
@@ -44,20 +47,39 @@ class Event:
 class EventBus:
     """Bus de eventos asíncrono para comunicación entre agentes"""
 
+    MAX_QUEUE_SIZE = 10000  # Backpressure: prevent unbounded memory growth
+
     def __init__(self):
         self._subscribers: Dict[EventType, List[Callable]] = {}
-        self._event_queue: asyncio.Queue = asyncio.Queue()
+        self._event_queue: asyncio.Queue = asyncio.Queue(maxsize=self.MAX_QUEUE_SIZE)
         self._running = False
+        self._event_count = 0
+        self._error_count = 0
 
     def subscribe(self, event_type: EventType, callback: Callable):
-        """Suscribirse a un tipo de evento"""
+        """Suscribirse a un tipo de evento (deduplicated)"""
         if event_type not in self._subscribers:
             self._subscribers[event_type] = []
-        self._subscribers[event_type].append(callback)
+        # Prevent duplicate subscriptions of same callback
+        if callback not in self._subscribers[event_type]:
+            self._subscribers[event_type].append(callback)
 
     async def publish(self, event: Event):
         """Publicar un evento"""
-        await self._event_queue.put(event)
+        try:
+            self._event_queue.put_nowait(event)
+            self._event_count += 1
+        except asyncio.QueueFull:
+            logger.warning(
+                f"EventBus queue full ({self.MAX_QUEUE_SIZE}), "
+                f"dropping oldest event to make room"
+            )
+            try:
+                self._event_queue.get_nowait()  # Drop oldest
+            except asyncio.QueueEmpty:
+                pass
+            await self._event_queue.put(event)
+            self._event_count += 1
 
     async def start(self):
         """Iniciar el procesamiento de eventos"""
@@ -79,7 +101,16 @@ class EventBus:
                 callback(event)
                 for callback in self._subscribers[event.type]
             ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    self._error_count += 1
+                    cb_name = self._subscribers[event.type][i].__qualname__
+                    logger.error(
+                        f"EventBus callback error in {cb_name} "
+                        f"for {event.type.value}: {result} "
+                        f"(total errors: {self._error_count})"
+                    )
 
     def stop(self):
         """Detener el procesamiento de eventos"""

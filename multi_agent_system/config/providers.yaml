@@ -1,7 +1,7 @@
 llm:
   providers:
     openai:
-      enabled: true
+      enabled: false
       api_key: "${OPENAI_API_KEY}"
       model: "gpt-4"
       priority: 1
@@ -9,7 +9,7 @@ llm:
         base_url: "https://api.openai.com/v1"
 
     anthropic:
-      enabled: true
+      enabled: false
       api_key: "${ANTHROPIC_API_KEY}"
       model: "claude-3-sonnet-20240229"
       priority: 2
@@ -34,14 +34,20 @@ llm:
     minimax:
       enabled: true
       api_key: "${MINIMAX_API_KEY}"
-      model: "MiniMax-Text-01"
+      model: "${LLM_MODEL}"
       priority: 1
-      config: {}
+      config:
+        base_url: "${MINIMAX_BASE_URL}"
 
   default_provider: "minimax"
-  fallback_enabled: true
+  fallback_enabled: false
   retry_count: 3
 
   # Temperature settings
   default_temperature: 0.7
   max_tokens: 4096
+
+# Execution mode: "docker" (isolated container) or "direct" (host filesystem)
+execution:
+  mode: "docker"
+  workspace: ""  # Empty = default agent_workspace; set to absolute path for existing projects

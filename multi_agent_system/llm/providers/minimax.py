@@ -22,7 +22,7 @@ class MiniMaxProvider(LLMProvider):
         **kwargs
     ) -> str:
         """Send chat messages to MiniMax API"""
-        url = f"{self.base_url}/chat_completions"
+        url = f"{self.base_url}/chat/completions"
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",

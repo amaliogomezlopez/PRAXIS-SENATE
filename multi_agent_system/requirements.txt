@@ -23,6 +23,12 @@ sse-starlette>=2.0.0
 aiosqlite>=0.19.0
 sqlalchemy[asyncio]>=2.0.0
 
+# Template engine for dynamic role files
+jinja2>=3.1.0
+
+# Testing
+playwright>=1.40.0
+
 # Testing & E2E
 sseclient>=3.1.0
 requests>=2.31.0

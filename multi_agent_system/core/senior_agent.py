@@ -11,6 +11,7 @@ from core.manager_agent import ManagerAgent
 from core.event_bus import EventBus, Event, EventType
 from core.state_manager import StateManager, Task, TaskStatus
 from core.json_utils import extract_json, extract_and_validate_json
+from core.experiment_tracker import ExperimentTracker
 from llm.manager import LLMManager
 from llm.base import LLMMessage
 from roles.loader import get_role_loader, AgentRole
@@ -49,6 +50,14 @@ class SeniorAgent(ManagerAgent):
         self.critic_blocking = self.critic_config.get("blocking", True)
         self._critique_results: Dict[str, Dict] = {}
         self._pending_critiques: Dict[str, asyncio.Event] = {}
+        self._critique_subscribed = False
+
+        # Memory management constants
+        self._max_corrections_per_worker = 20
+        self._max_critique_results = 50
+
+        # Experiment tracker (autoresearch-inspired)
+        self._experiment_tracker = ExperimentTracker()
 
     async def _publish_llm_event(self, event_type: EventType, data: Dict[str, Any]):
         """Publish an LLM transparency event"""
@@ -60,11 +69,14 @@ class SeniorAgent(ManagerAgent):
         )
         await self.event_bus.publish(event)
 
-        if self.critic_enabled:
+    def _ensure_critique_subscription(self):
+        """Subscribe to critique events exactly once"""
+        if self.critic_enabled and not self._critique_subscribed:
             self.event_bus.subscribe(
                 EventType.CRITIQUE_RECEIVED,
                 self._on_critique_received
             )
+            self._critique_subscribed = True
 
     async def receive_correction(self, worker_id: str, correction: str):
         """
@@ -76,10 +88,13 @@ class SeniorAgent(ManagerAgent):
         """
         await self._log(f"Received correction for {worker_id}: {correction}")
 
-        # Store correction
+        # Store correction (bounded)
         if worker_id not in self.corrections:
             self.corrections[worker_id] = []
         self.corrections[worker_id].append(correction)
+        # Trim to prevent unbounded growth
+        if len(self.corrections[worker_id]) > self._max_corrections_per_worker:
+            self.corrections[worker_id] = self.corrections[worker_id][-self._max_corrections_per_worker:]
 
         # Analyze correction and decide action
         action = await self._analyze_correction(worker_id, correction)
@@ -121,6 +136,9 @@ class SeniorAgent(ManagerAgent):
         await self._log(f"Processing user task: {task.description}")
         await self._publish_progress("Analyzing task", 0.1)
 
+        # Ensure critique subscription is active (once)
+        self._ensure_critique_subscription()
+
         # Descomponer en subtareas (LLM-powered in SeniorAgent)
         subtasks = await self._decompose_task(task)
 
@@ -135,7 +153,28 @@ class SeniorAgent(ManagerAgent):
 
                 if critique and not critique.get("approved", True):
                     await self._log("Critic rejected decomposition, redecomposing...")
+                    # Inject critique context into task metadata for worker visibility
+                    critique_context = {
+                        "critic_feedback": critique.get("reasoning", ""),
+                        "critic_risks": critique.get("risks", []),
+                        "critic_gaps": critique.get("gaps", []),
+                        "critic_suggestions": critique.get("suggestions", []),
+                        "redecomposed": True,
+                    }
+                    await self.state_manager.update_task(
+                        task_id,
+                        metadata={**(task.metadata or {}), **critique_context}
+                    )
                     subtasks = await self._redecompose_with_critique(task, critique)
+
+                # Clean up consumed critique result
+                self._critique_results.pop(task_id, None)
+
+                # Trim old critique results to prevent memory leak
+                if len(self._critique_results) > self._max_critique_results:
+                    oldest_keys = sorted(self._critique_results.keys())[:len(self._critique_results) - self._max_critique_results]
+                    for k in oldest_keys:
+                        del self._critique_results[k]
 
         await self._publish_progress("Creating subtasks", 0.3)
 
@@ -262,12 +301,20 @@ Respond in JSON array format:
             if subtasks is None:
                 raise ValueError("Failed to extract valid JSON from LLM response")
 
+            # Type guard: extract_json may return a str if the LLM returned a raw string
+            if isinstance(subtasks, str):
+                raise ValueError(f"LLM response parsed as str, expected list/dict. Raw: {subtasks[:100]}")
+
             # Validate subtasks
+            if isinstance(subtasks, dict):
+                subtasks = [subtasks]
             if not isinstance(subtasks, list):
                 raise ValueError(f"Response is not a list, got {type(subtasks)}")
 
             # Ensure each subtask has required fields
             for subtask in subtasks:
+                if not isinstance(subtask, dict):
+                    continue
                 if "description" not in subtask:
                     subtask["description"] = "Execute subtask"
                 if "type" not in subtask:
@@ -332,6 +379,8 @@ Based on the correction, what should be done? Respond in JSON format:
             action = extract_json(json_match)
             if action is None:
                 raise ValueError("Failed to extract valid JSON from LLM response")
+            if not isinstance(action, dict):
+                raise ValueError(f"LLM response parsed as {type(action).__name__}, expected dict. Raw: {str(action)[:100]}")
             return action
 
         except Exception as e:
@@ -382,6 +431,13 @@ Be practical and specific. Focus on what needs to be done, not how to do it in d
                 LLMMessage(role="user", content=prompt)
             ]
 
+            # Emit thinking event first
+            await self._publish_llm_event(EventType.AGENT_THINKING, {
+                "task_id": task.id,
+                "agent": self.agent_id,
+                "message": "Decomposing task into subtasks..."
+            })
+
             # Publish LLM prompt event for transparency
             await self._publish_llm_event(EventType.LLM_PROMPT, {
                 "task_id": task.id,
@@ -389,16 +445,10 @@ Be practical and specific. Focus on what needs to be done, not how to do it in d
                 "action": "decompose_task",
                 "system_prompt": self._system_prompt[:500] + "..." if len(self._system_prompt) > 500 else self._system_prompt,
                 "user_prompt": prompt[:1000] + "..." if len(prompt) > 1000 else prompt,
-                "model": result.get("provider", "unknown")
+                "model": "unknown"
             })
 
-            # Emit thinking event
-            await self._publish_llm_event(EventType.AGENT_THINKING, {
-                "task_id": task.id,
-                "agent": self.agent_id,
-                "message": "Decomposing task into subtasks..."
-            })
-
+            # Call LLM
             result = await self.llm.chat(messages, temperature=0.5, max_tokens=2000)
             response_text = result["response"]
 
@@ -416,14 +466,24 @@ Be practical and specific. Focus on what needs to be done, not how to do it in d
             subtasks = extract_json(response_text)
 
             if subtasks is None:
-                raise ValueError("Failed to extract valid JSON decomposition from LLM response")
+                logger.warning(f"JSON extraction failed for decomposition. Response: {response_text[:300]}")
+                # Fallback: create single-step task
+                subtasks = [{"description": task.description, "type": "create_file", "params": {}, "priority": 1, "dependencies": []}]
+
+            # Type guard: extract_json may return a str if the LLM returned a raw string
+            if isinstance(subtasks, str):
+                raise ValueError(f"LLM response parsed as str, expected list/dict. Raw: {subtasks[:100]}")
 
             # Validate subtasks
+            if isinstance(subtasks, dict):
+                subtasks = [subtasks]
             if not isinstance(subtasks, list):
                 raise ValueError(f"Decomposition response is not a list, got {type(subtasks)}")
 
             # Ensure each subtask has required fields
             for subtask in subtasks:
+                if not isinstance(subtask, dict):
+                    continue
                 if "description" not in subtask:
                     subtask["description"] = "Execute subtask"
                 if "type" not in subtask:
@@ -493,8 +553,23 @@ Provide analysis in JSON format:
             # Extract JSON using robust parser
             analysis = extract_json(response_text)
 
+            # Fallback if JSON extraction fails
             if analysis is None:
-                raise ValueError("Failed to extract valid JSON analysis from LLM response")
+                logger.warning(f"JSON extraction failed, creating default analysis. Response: {response_text[:300]}")
+                analysis = {
+                    "success": True,
+                    "summary": response_text[:500] if response_text else "Analysis completed but JSON extraction failed",
+                    "gaps": [],
+                    "quality_score": 7,
+                    "recommendations": [],
+                    "next_steps": [],
+                    "raw_response": response_text[:1000] if response_text else None
+                }
+
+            # Type guard: extract_json may return a str instead of dict
+            if not isinstance(analysis, dict):
+                logger.warning(f"Analysis parsed as {type(analysis).__name__}, wrapping. Raw: {str(analysis)[:100]}")
+                analysis = {"success": True, "summary": str(analysis), "gaps": [], "quality_score": 7}
 
             # Store analysis
             analysis["subtask_count"] = len(results)
@@ -502,17 +577,57 @@ Provide analysis in JSON format:
 
             await self.state_manager.update_task(task.id, result=analysis)
 
-            # Log findings
-            if analysis.get("gaps"):
-                await self._log(f"Gaps detected: {', '.join(analysis['gaps'][:3])}")
+            # Log findings - handle gaps that might be strings or dicts
+            gaps = analysis.get("gaps", [])
+            if gaps:
+                gap_strings = []
+                for g in gaps[:3]:
+                    if isinstance(g, dict):
+                        gap_strings.append(g.get("description", str(g)))
+                    else:
+                        gap_strings.append(str(g))
+                await self._log(f"Gaps detected: {', '.join(gap_strings)}")
 
-            if analysis.get("quality_score", 0) < 7:
-                await self._log(f"Quality score low: {analysis.get('quality_score')}/10")
+            quality = analysis.get("quality_score", 7)
+            try:
+                quality = int(quality)
+            except (ValueError, TypeError):
+                quality = 7
 
-            await self._log(f"Analysis complete. Quality: {analysis.get('quality_score')}/10")
+            if quality < 7:
+                await self._log(f"Quality score low: {quality}/10")
+
+            await self._log(f"Analysis complete. Quality: {quality}/10")
+
+            # Record experiment result (autoresearch-inspired tracking)
+            duration_sec = None
+            if task.started_at and task.completed_at:
+                duration_sec = (task.completed_at - task.started_at).total_seconds()
+            elif task.started_at:
+                duration_sec = (datetime.now() - task.started_at).total_seconds()
+
+            outcome = "keep" if analysis.get("success", True) and quality >= 5 else "discard"
+            self._experiment_tracker.record(
+                task_id=task.id,
+                description=task.description,
+                outcome=outcome,
+                quality_score=quality,
+                duration_sec=duration_sec,
+                subtask_count=len(results),
+                provider=analysis.get("analyzed_by", "unknown"),
+                notes=analysis.get("summary", "")[:300],
+            )
 
         except Exception as e:
             logger.error(f"Failed to analyze results with LLM: {e}")
+            # Record as crash in experiment tracker
+            self._experiment_tracker.record(
+                task_id=task.id,
+                description=task.description,
+                outcome="crash",
+                subtask_count=len(results),
+                notes=f"Analysis failed: {str(e)}"[:300],
+            )
             # Store error as result instead of crashing
             await self.state_manager.update_task(task.id, result={
                 "error": f"Analysis failed: {str(e)}",

@@ -11,13 +11,20 @@ from datetime import datetime
 class FileOperations:
     """Operaciones de archivos para agentes"""
 
-    def __init__(self, workspace_dir: str = "/workspace/agent_workspace"):
-        self.workspace_dir = Path(workspace_dir)
+    def __init__(self, workspace_dir: str = None):
+        if workspace_dir is None:
+            # Default to agent_workspace in project root
+            workspace_dir = Path(__file__).parent.parent / "agent_workspace"
+        else:
+            workspace_dir = Path(workspace_dir)
+        self.workspace_dir = workspace_dir
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
     async def create_file(self, path: str, content: str) -> dict:
         """Crear un nuevo archivo"""
         try:
+            if not path:
+                return {"success": False, "error": "Path is required", "path": None}
             file_path = self.workspace_dir / path
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -44,6 +51,8 @@ class FileOperations:
     async def read_file(self, path: str) -> dict:
         """Leer un archivo"""
         try:
+            if not path:
+                return {"success": False, "error": "Path is required", "path": None}
             file_path = self.workspace_dir / path
             if not file_path.exists():
                 return {
@@ -74,6 +83,8 @@ class FileOperations:
     async def update_file(self, path: str, content: str) -> dict:
         """Actualizar un archivo existente"""
         try:
+            if not path:
+                return {"success": False, "error": "Path is required", "path": None}
             file_path = self.workspace_dir / path
             if not file_path.exists():
                 return {
@@ -104,6 +115,8 @@ class FileOperations:
     async def delete_file(self, path: str) -> dict:
         """Eliminar un archivo"""
         try:
+            if not path:
+                return {"success": False, "error": "Path is required", "path": None}
             file_path = self.workspace_dir / path
             if not file_path.exists():
                 return {
@@ -133,6 +146,8 @@ class FileOperations:
     async def list_files(self, directory: str = "") -> dict:
         """Listar archivos en un directorio"""
         try:
+            if directory is None:
+                directory = ""
             dir_path = self.workspace_dir / directory
             if not dir_path.exists():
                 return {
@@ -170,6 +185,8 @@ class FileOperations:
     async def search_files(self, pattern: str, directory: str = "") -> dict:
         """Buscar archivos por patrón"""
         try:
+            if directory is None:
+                directory = ""
             dir_path = self.workspace_dir / directory
             if not dir_path.exists():
                 return {

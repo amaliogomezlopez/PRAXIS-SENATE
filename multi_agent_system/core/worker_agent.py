@@ -20,6 +20,11 @@ from llm.base import LLMMessage
 class WorkerAgent(AgentBase):
     """Agente trabajador que ejecuta tareas específicas con soporte HITL"""
 
+    # Circuit breaker: max consecutive errors before backing off
+    MAX_CONSECUTIVE_ERRORS = 5
+    BACKOFF_BASE_SECONDS = 2.0
+    BACKOFF_MAX_SECONDS = 60.0
+
     def __init__(
         self,
         agent_id: str,
@@ -27,7 +32,9 @@ class WorkerAgent(AgentBase):
         state_manager: StateManager,
         file_ops: FileOperations,
         web_tools: WebTools,
-        llm_manager: Optional[LLMManager] = None
+        llm_manager: Optional[LLMManager] = None,
+        execution_mode: str = "docker",
+        workspace: str = None
     ):
         super().__init__(agent_id, event_bus, state_manager)
         self.file_ops = file_ops
@@ -44,10 +51,14 @@ class WorkerAgent(AgentBase):
         )
 
         # Docker executor for safe command execution
-        self._docker_executor = DockerAgentExecutor()
+        self._docker_executor = DockerAgentExecutor(mode=execution_mode, workspace=workspace)
 
         # HITL: Pending human feedback per task
         self._pending_feedback: Dict[str, str] = {}
+
+        # Circuit breaker state
+        self._consecutive_errors = 0
+        self._total_tasks_processed = 0
 
     async def _on_agent_message(self, event: Event):
         """Handle incoming agent messages (including human feedback)"""
@@ -80,7 +91,7 @@ class WorkerAgent(AgentBase):
             await self.state_manager.update_task(task_id, metadata=task.metadata)
 
     async def run(self):
-        """Loop principal del worker con soporte HITL"""
+        """Loop principal del worker con soporte HITL y circuit breaker"""
         await self.start()
 
         # Subscribe to human feedback events
@@ -94,16 +105,39 @@ class WorkerAgent(AgentBase):
                     await self._log(f"Processing human feedback for {self.current_task}: {feedback[:50]}...")
                     await self._process_human_feedback(self.current_task, feedback)
 
+                # Clean up stale pending feedback (tasks that finished or were never assigned)
+                if len(self._pending_feedback) > 50:
+                    stale_keys = list(self._pending_feedback.keys())[:25]
+                    for k in stale_keys:
+                        del self._pending_feedback[k]
+
                 # Esperar tareas de la cola
                 task_data = await asyncio.wait_for(
                     self._task_queue.get(),
                     timeout=1.0
                 )
                 await self._execute_task(task_data)
+                self._total_tasks_processed += 1
+                self._consecutive_errors = 0  # Reset on success
+
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
-                await self._log(f"Error in worker loop: {e}", "error")
+                self._consecutive_errors += 1
+                await self._log(f"Error in worker loop: {e} (consecutive: {self._consecutive_errors})", "error")
+
+                # Circuit breaker: exponential backoff on repeated errors
+                if self._consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+                    backoff = min(
+                        self.BACKOFF_BASE_SECONDS * (2 ** (self._consecutive_errors - self.MAX_CONSECUTIVE_ERRORS)),
+                        self.BACKOFF_MAX_SECONDS
+                    )
+                    await self._log(
+                        f"Circuit breaker: {self._consecutive_errors} consecutive errors, "
+                        f"backing off {backoff:.1f}s",
+                        "warning"
+                    )
+                    await asyncio.sleep(backoff)
 
     async def assign_task(self, task_data: Dict[str, Any]):
         """Asignar una tarea al worker"""
@@ -456,6 +490,10 @@ Respond in JSON format:
             # Extract JSON using robust parser
             decision = extract_json(response_text)
             if decision is not None:
+                # Type guard: extract_json may return a str instead of dict
+                if not isinstance(decision, dict):
+                    logger.warning(f"LLM response parsed as {type(decision).__name__}, expected dict. Raw: {str(decision)[:100]}")
+                    return {"action": "unknown", "params": {}}
                 return decision
 
             logger.warning(f"Failed to extract JSON from LLM response: {response_text[:100]}")

@@ -88,6 +88,10 @@ class StateManager:
         try:
             conn = sqlite3.connect(str(self._db_path))
             cursor = conn.cursor()
+
+            # Enable WAL mode for better concurrent read/write performance
+            cursor.execute("PRAGMA journal_mode=WAL")
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
@@ -366,3 +370,40 @@ class StateManager:
                 "open_problems": len([p for p in self._problems.values() if not p.resolved]),
                 "file_changes": len(self._file_changes),
             }
+
+    async def cleanup_completed_tasks(self, keep_recent: int = 100):
+        """Remove old completed/failed tasks from memory (keeps them in DB).
+
+        Prevents unbounded memory growth during long-running sessions.
+        Only removes from in-memory dict; SQLite retains full history.
+        """
+        async with self._lock:
+            terminal_tasks = [
+                t for t in self._tasks.values()
+                if t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED)
+            ]
+            # Sort by completion time, oldest first
+            terminal_tasks.sort(
+                key=lambda t: t.completed_at or t.created_at
+            )
+            to_remove = terminal_tasks[:-keep_recent] if len(terminal_tasks) > keep_recent else []
+            for task in to_remove:
+                # Don't remove if any in-memory task references this as parent
+                has_active_children = any(
+                    t.parent_task_id == task.id
+                    and t.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED)
+                    for t in self._tasks.values()
+                )
+                if not has_active_children:
+                    del self._tasks[task.id]
+
+            if to_remove:
+                logger.info(
+                    f"Cleaned up {len(to_remove)} completed tasks from memory "
+                    f"(kept {keep_recent} recent, DB retains all)"
+                )
+
+            # Also trim file_changes list
+            if len(self._file_changes) > 1000:
+                self._file_changes = self._file_changes[-500:]
+                logger.info("Trimmed file changes history to last 500 entries")

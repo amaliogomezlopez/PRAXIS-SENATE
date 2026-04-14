@@ -1,0 +1,83 @@
+{
+  "timestamp": "2026-04-09T11:16:32.586566",
+  "total": 8,
+  "passed": 8,
+  "failed": 0,
+  "tests": [
+    {
+      "name": "Dashboard Load & Structure",
+      "passed": true,
+      "duration_ms": 842,
+      "error": null,
+      "screenshots": [
+        "C:\\Users\\amalio\\Desktop\\PROGRAMACION\\01-VS_CODE\\45-PRAXIS-SENATE\\multi_agent_system\\qa_logs\\screenshots\\01_dashboard_loaded.png"
+      ],
+      "anomalies": []
+    },
+    {
+      "name": "WebSocket Connection",
+      "passed": true,
+      "duration_ms": 16,
+      "error": null,
+      "screenshots": [],
+      "anomalies": []
+    },
+    {
+      "name": "Submit Complex Task",
+      "passed": true,
+      "duration_ms": 155,
+      "error": null,
+      "screenshots": [
+        "C:\\Users\\amalio\\Desktop\\PROGRAMACION\\01-VS_CODE\\45-PRAXIS-SENATE\\multi_agent_system\\qa_logs\\screenshots\\03_task_form_filled.png"
+      ],
+      "anomalies": []
+    },
+    {
+      "name": "Task Lifecycle (Pending -> InProgress -> Completed)",
+      "passed": true,
+      "duration_ms": 45280,
+      "error": null,
+      "screenshots": [
+        "C:\\Users\\amalio\\Desktop\\PROGRAMACION\\01-VS_CODE\\45-PRAXIS-SENATE\\multi_agent_system\\qa_logs\\screenshots\\04_task_pending.png",
+        "C:\\Users\\amalio\\Desktop\\PROGRAMACION\\01-VS_CODE\\45-PRAXIS-SENATE\\multi_agent_system\\qa_logs\\screenshots\\04_task_final_state.png"
+      ],
+      "anomalies": []
+    },
+    {
+      "name": "Task Inspector Modal",
+      "passed": true,
+      "duration_ms": 157,
+      "error": null,
+      "screenshots": [
+        "C:\\Users\\amalio\\Desktop\\PROGRAMACION\\01-VS_CODE\\45-PRAXIS-SENATE\\multi_agent_system\\qa_logs\\screenshots\\05_task_inspector.png"
+      ],
+      "anomalies": []
+    },
+    {
+      "name": "LLM Stream Panels Render",
+      "passed": true,
+      "duration_ms": 0,
+      "error": null,
+      "screenshots": [],
+      "anomalies": []
+    },
+    {
+      "name": "Role Editor Modal",
+      "passed": true,
+      "duration_ms": 967,
+      "error": null,
+      "screenshots": [
+        "C:\\Users\\amalio\\Desktop\\PROGRAMACION\\01-VS_CODE\\45-PRAXIS-SENATE\\multi_agent_system\\qa_logs\\screenshots\\07_role_editor.png"
+      ],
+      "anomalies": []
+    },
+    {
+      "name": "Console & Backend Log Analysis",
+      "passed": true,
+      "duration_ms": 0,
+      "error": null,
+      "screenshots": [],
+      "anomalies": []
+    }
+  ]
+}

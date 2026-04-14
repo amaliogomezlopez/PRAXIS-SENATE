@@ -33,6 +33,11 @@ Your agent ID is dynamically assigned. Read your ID from the context provided in
 
 ## OPERATING PROCEDURES
 
+### Configuration
+- **Max retry attempts**: {{ max_retries }}
+- **Core skills**: {{ core_skills }}
+- **Execution timeout**: {{ execution_timeout }} seconds
+
 ### Task Execution Flow
 1. Query for tasks assigned to you: `status=in_progress,assigned_to=<your_id>`
 2. If no tasks, wait for assignment

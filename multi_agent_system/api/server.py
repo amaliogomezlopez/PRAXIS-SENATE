@@ -3,6 +3,7 @@ FastAPI Server with REST API and WebSocket support
 """
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
@@ -107,6 +108,11 @@ async def lifespan(app: FastAPI):
     file_ops = FileOperations()
     web_tools = WebTools()
 
+    # Execution mode from config
+    exec_config = config.get("execution", {})
+    execution_mode = os.environ.get("PRAXIS_MODE", exec_config.get("mode", "docker"))
+    workspace = os.environ.get("PRAXIS_WORKSPACE", exec_config.get("workspace", "")) or None
+
     # Create critic if enabled
     critic_config = config.get("critic", {})
     critic = None
@@ -138,7 +144,9 @@ async def lifespan(app: FastAPI):
             state_manager=state_manager,
             file_ops=file_ops,
             web_tools=web_tools,
-            llm_manager=llm_manager
+            llm_manager=llm_manager,
+            execution_mode=execution_mode,
+            workspace=workspace
         )
         workers.append(worker)
         senior_agent.add_worker(worker)
