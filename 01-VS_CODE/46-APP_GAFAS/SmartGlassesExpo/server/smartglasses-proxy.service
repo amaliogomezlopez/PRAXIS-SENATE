@@ -1,0 +1,15 @@
+[Unit]
+Description=SmartGlasses AI Proxy Server
+After=network.target
+
+[Service]
+Type=simple
+User=amalio
+WorkingDirectory=/home/amalio/smartglasses-proxy
+ExecStart=/home/amalio/smartglasses-proxy/venv/bin/gunicorn --bind 0.0.0.0:5050 --workers 2 --timeout 60 server:app
+Restart=always
+RestartSec=5
+EnvironmentFile=/home/amalio/smartglasses-proxy/.env
+
+[Install]
+WantedBy=multi-user.target
